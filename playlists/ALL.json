@@ -1,0 +1,40 @@
+{
+  "name": "ALL",
+  "items": [
+    {
+      "preset_name": "ITIXO",
+      "duration": 10.0,
+      "use_anim_duration": false
+    },
+    {
+      "preset_name": "Weather - Ostrava",
+      "duration": 10.0,
+      "use_anim_duration": false
+    },
+    {
+      "preset_name": "Custom Clocks",
+      "duration": 10.0,
+      "use_anim_duration": false
+    },
+    {
+      "preset_name": "Update Logo",
+      "duration": 10.0,
+      "use_anim_duration": false
+    },
+    {
+      "preset_name": "UCK26 - anim",
+      "duration": 10.0,
+      "use_anim_duration": false
+    },
+    {
+      "preset_name": "UCK26-Countdown",
+      "duration": 10.0,
+      "use_anim_duration": false
+    },
+    {
+      "preset_name": "YouTube - Update",
+      "duration": 10.0,
+      "use_anim_duration": false
+    }
+  ]
+}

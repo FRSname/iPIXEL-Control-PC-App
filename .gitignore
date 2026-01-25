@@ -1,0 +1,28 @@
+/llama-20260114-144425.piskel
+/test_thumbnails.py
+/iPixelAnimation.aep
+/ipixel_settings.json
+/Gallery/clock_frames
+/Notes.md
+
+# Settings and API keys (DO NOT COMMIT)
+ipixel_settings.json
+ipixel_secrets.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

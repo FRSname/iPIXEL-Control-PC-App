@@ -1,0 +1,13 @@
+{
+  "name": "Offline",
+  "items": [
+    {
+      "preset_name": "OFFLINE",
+      "duration": 10
+    },
+    {
+      "preset_name": "TIME",
+      "duration": 5
+    }
+  ]
+}
