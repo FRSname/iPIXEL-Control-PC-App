@@ -56,10 +56,11 @@ static ScanCb g_scanCb;
 
 static void scanEndedCb(NimBLEScanResults /*r*/) { g_scanning = false; }
 
-// Fires for every NOTIFY frame. We only care about "0x05 _ _ _ code" — code
-// 0/1 means window-ack, code 3 means final-ack. AckManager (python side) does
-// the same thing in ack_manager.py. We also log a short hex dump so unknown
-// frame formats from different panel firmwares are visible.
+// Fires for every NOTIFY frame. send_image ACKs are "0x05 _ _ _ code" with
+// code 0/1 = window ack and code 3 = final ack (matches AckManager). Other
+// frames (e.g. the 11-byte device-info reply from the handshake) use their
+// own shape, so we wake the semaphore unconditionally and let the caller
+// filter by inspecting g_ackFinal / drain stale acks before each send.
 static void notifyHandler(NimBLERemoteCharacteristic* /*ch*/,
                           uint8_t* data, size_t len, bool /*isNotify*/) {
     char hex[64] = {0};
@@ -67,11 +68,8 @@ static void notifyHandler(NimBLERemoteCharacteristic* /*ch*/,
     for (size_t i = 0; i < n; ++i) snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", data[i]);
     Serial.printf("[ble] notify len=%u: %s\n", (unsigned)len, hex);
 
-    if (len >= 5 && data[0] == 0x05) {
-        uint8_t code = data[4];
-        if (code == 3) g_ackFinal = true;
-        if (g_ackSem) xSemaphoreGive(g_ackSem);
-    }
+    if (len >= 5 && data[0] == 0x05 && data[4] == 3) g_ackFinal = true;
+    if (g_ackSem) xSemaphoreGive(g_ackSem);
 }
 
 class ClientCb : public NimBLEClientCallbacks {
