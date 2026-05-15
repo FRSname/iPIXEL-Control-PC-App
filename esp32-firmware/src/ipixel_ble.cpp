@@ -22,6 +22,7 @@ static SemaphoreHandle_t g_ackSem      = nullptr;
 static volatile bool    g_ackFinal     = false;
 
 static uint32_t         g_lastAttempt  = 0;
+static bool             g_attemptedOnce = false;
 static const uint32_t   RETRY_MS       = 10000;
 
 // Panels advertise under one of several names depending on firmware vendor.
@@ -57,9 +58,15 @@ static void scanEndedCb(NimBLEScanResults /*r*/) { g_scanning = false; }
 
 // Fires for every NOTIFY frame. We only care about "0x05 _ _ _ code" — code
 // 0/1 means window-ack, code 3 means final-ack. AckManager (python side) does
-// the same thing in ack_manager.py.
+// the same thing in ack_manager.py. We also log a short hex dump so unknown
+// frame formats from different panel firmwares are visible.
 static void notifyHandler(NimBLERemoteCharacteristic* /*ch*/,
                           uint8_t* data, size_t len, bool /*isNotify*/) {
+    char hex[64] = {0};
+    size_t n = len < 16 ? len : 16;
+    for (size_t i = 0; i < n; ++i) snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", data[i]);
+    Serial.printf("[ble] notify len=%u: %s\n", (unsigned)len, hex);
+
     if (len >= 5 && data[0] == 0x05) {
         uint8_t code = data[4];
         if (code == 3) g_ackFinal = true;
@@ -179,7 +186,10 @@ static bool tryConnect() {
         return false;
     }
 
-    if (!g_notifyChar->subscribe(true, notifyHandler)) {
+    // Subscribe with write-response on the CCCD so we know the panel accepted
+    // the notification request. Some firmware variants ignore write-without-
+    // response CCCD updates and silently drop subsequent ACKs.
+    if (!g_notifyChar->subscribe(true, notifyHandler, true)) {
         Serial.println("[ble] notify subscribe failed");
         g_client->disconnect();
         return false;
@@ -194,7 +204,9 @@ void ipixelBleTick() {
     if (g_scanning) return;
     if (g_pinnedMac.length() == 0) return;
     uint32_t now = millis();
-    if (now - g_lastAttempt < RETRY_MS) return;
+    // First attempt fires immediately; subsequent attempts are rate-limited.
+    if (g_attemptedOnce && (now - g_lastAttempt < RETRY_MS)) return;
+    g_attemptedOnce = true;
     g_lastAttempt = now;
     tryConnect();
 }

@@ -139,6 +139,18 @@ void loop() {
 
     ipixelBleTick();
 
+    // When BLE comes up (or comes back after a drop) repaint whatever the
+    // renderer last produced — otherwise the panel keeps showing its idle
+    // screen until the follower count actually changes.
+    static bool wasBleConnected = false;
+    bool nowBle = ipixelBleIsConnected();
+    if (nowBle && !wasBleConnected && lastDisplayText.length() > 0) {
+        Serial.println("[ble] link up — repushing last frame");
+        rendererStaticFrame(fb, lastDisplayText.c_str(), cfg.textColor, cfg.bgColor);
+        ipixelBleSendFrame(fb);
+    }
+    wasBleConnected = nowBle;
+
     if (configIsProvisioned(cfg) &&
         (gFetchNow || (millis() - lastFetchMs) >= cfg.refreshSec * 1000UL)) {
         gFetchNow = false;
