@@ -76,10 +76,27 @@ void webUiBegin(AppConfig& cfgRef) {
 
     // POST JSON body to update config. Fields are optional; missing ones keep
     // their current value. Token-only updates avoid leaking the token back via GET.
-    AsyncCallbackJsonWebHandler* save = new AsyncCallbackJsonWebHandler(
-        "/api/config",
-        [](AsyncWebServerRequest* req, JsonVariant& json) {
-            JsonObject o = json.as<JsonObject>();
+    //
+    // We assemble the body manually rather than using AsyncCallbackJsonWebHandler
+    // because that helper's header pulls in ArduinoJson 6 APIs that ArduinoJson 7
+    // removed. The static buffer is fine for a personal-use config endpoint.
+    server.on(
+        "/api/config", HTTP_POST,
+        [](AsyncWebServerRequest* /*req*/) {},
+        nullptr,
+        [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+            static String body;
+            if (index == 0) body = "";
+            body.concat((const char*)data, len);
+            if (index + len < total) return;
+
+            JsonDocument doc;
+            if (deserializeJson(doc, body)) {
+                req->send(400, "application/json", "{\"ok\":false,\"err\":\"bad json\"}");
+                body = "";
+                return;
+            }
+            JsonObject o = doc.as<JsonObject>();
             if (o["ig_user_id"].is<const char*>())   gCfg->igUserId    = o["ig_user_id"].as<const char*>();
             if (o["access_token"].is<const char*>()) gCfg->accessToken = o["access_token"].as<const char*>();
             if (o["refresh_sec"].is<uint32_t>())     gCfg->refreshSec  = o["refresh_sec"].as<uint32_t>();
@@ -88,10 +105,10 @@ void webUiBegin(AppConfig& cfgRef) {
             if (o["bg_color"].is<const char*>())     gCfg->bgColor     = parseHexColor(o["bg_color"].as<const char*>(), gCfg->bgColor);
             if (o["panel_mac"].is<const char*>())    gCfg->panelMac    = o["panel_mac"].as<const char*>();
             configSave(*gCfg);
+            body = "";
             req->send(200, "application/json", "{\"ok\":true}");
         }
     );
-    server.addHandler(save);
 
     server.begin();
     Serial.printf("[web] http://%s/\n", WiFi.localIP().toString().c_str());
