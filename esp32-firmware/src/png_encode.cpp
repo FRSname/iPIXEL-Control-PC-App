@@ -133,8 +133,12 @@ static void emitLit(BitWr& w, uint8_t b) {
 static void emitLen(BitWr& w, int len) {
     int s = findLenSym(len);
     int sym = 257 + s;
-    // 257..279 → 7-bit codes 0..23 ; 280..287 → 8-bit codes 192..199
-    if (sym <= 279) bwHuff(w, (uint32_t)(sym - 257),       7);
+    // RFC 1951 §3.2.6 fixed Huffman table: symbols 256..279 map to 7-bit
+    // codes 0..23 — so code 0 is EOB (symbol 256), code 1 is length-symbol
+    // 257 (length 3), and a length-N symbol uses code (sym - 256). Older
+    // versions of this file used `sym - 257`, which collided length-3 with
+    // EOB and caused decoders to terminate mid-stream.
+    if (sym <= 279) bwHuff(w, (uint32_t)(sym - 256),       7);
     else            bwHuff(w, (uint32_t)(192 + sym - 280), 8);
     if (LEN_EXTRA[s]) bwLSB(w, (uint32_t)(len - LEN_BASE[s]), LEN_EXTRA[s]);
 }
