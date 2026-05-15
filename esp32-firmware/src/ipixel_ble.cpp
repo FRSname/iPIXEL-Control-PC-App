@@ -195,6 +195,27 @@ static bool tryConnect() {
         return false;
     }
 
+    // Required handshake — pypixelcolor's DeviceSession.connect() always
+    // sends this get_device_info command right after subscribing. Without it
+    // the panel ACKs subsequent send_image frames but ignores their content.
+    // Format: [8, 0, 1, 0x80, hour, minute, second, language=0]
+    while (xSemaphoreTake(g_ackSem, 0) == pdTRUE) {}
+    uint8_t initCmd[8] = { 8, 0, 1, 0x80, 0, 0, 0, 0 };
+    // Current wall-clock isn't synced yet; sending zeros works (the panel
+    // accepts any byte values here — only the command shape matters).
+    if (!g_writeChar->writeValue(initCmd, sizeof(initCmd), true)) {
+        Serial.println("[ble] init handshake write failed");
+        g_client->disconnect();
+        return false;
+    }
+    // Wait briefly for the device-info response (we don't parse it — we just
+    // need the panel to consider the session "established").
+    if (xSemaphoreTake(g_ackSem, pdMS_TO_TICKS(1500)) != pdTRUE) {
+        Serial.println("[ble] init handshake: no response (continuing anyway)");
+    } else {
+        Serial.println("[ble] init handshake OK");
+    }
+
     Serial.printf("[ble] connected (MTU=%u)\n", (unsigned)g_client->getMTU());
     return true;
 }
