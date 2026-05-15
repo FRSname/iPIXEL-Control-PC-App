@@ -91,26 +91,26 @@ async function loadAll() {
 }
 
 document.getElementById('save').addEventListener('click', async () => {
-  const body = {
-    ig_user_id:  document.getElementById('ig_user_id').value.trim(),
-    refresh_sec: parseInt(document.getElementById('refresh_sec').value, 10) || 300,
-    format_mode: parseInt(document.getElementById('format_mode').value, 10) || 0,
-    text_color:  document.getElementById('text_color').value,
-    bg_color:    document.getElementById('bg_color').value,
-    panel_mac:   document.getElementById('panel_mac').value.trim(),
-  };
+  const params = new URLSearchParams();
+  params.set('ig_user_id',  document.getElementById('ig_user_id').value.trim());
+  params.set('refresh_sec', String(parseInt(document.getElementById('refresh_sec').value, 10) || 300));
+  params.set('format_mode', String(parseInt(document.getElementById('format_mode').value, 10) || 0));
+  params.set('text_color',  document.getElementById('text_color').value);
+  params.set('bg_color',    document.getElementById('bg_color').value);
+  params.set('panel_mac',   document.getElementById('panel_mac').value.trim());
   const tok = document.getElementById('access_token').value;
-  if (tok) body.access_token = tok;
+  if (tok) params.set('access_token', tok);
+
   const r = await fetch('/api/config', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
   });
   if (r.ok) {
     document.getElementById('access_token').value = '';
     loadAll();
   } else {
-    alert('save failed');
+    alert('save failed (' + r.status + ')');
   }
 });
 

@@ -60,7 +60,7 @@ static void pushFrame() {
 
 static void animateTo(const String& newText) {
     if (lastDisplayText.length() == 0) {
-        rendererDrawText(fb, newText.c_str(), cfg.textColor, cfg.bgColor);
+        rendererStaticFrame(fb, newText.c_str(), cfg.textColor, cfg.bgColor);
         pushFrame();
         lastDisplayText = newText;
         return;
@@ -74,7 +74,7 @@ static void animateTo(const String& newText) {
         pushFrame();
         delay(TWEEN_FRAME_MS);
     }
-    rendererDrawText(fb, newText.c_str(), cfg.textColor, cfg.bgColor);
+    rendererStaticFrame(fb, newText.c_str(), cfg.textColor, cfg.bgColor);
     pushFrame();
     lastDisplayText = newText;
 }
@@ -125,9 +125,12 @@ void setup() {
     lastFetchMs = millis() - cfg.refreshSec * 1000UL; // force first fetch immediately
 }
 
+extern volatile bool gFetchNow;
+
 void loop() {
     if (configIsProvisioned(cfg) &&
-        (millis() - lastFetchMs) >= cfg.refreshSec * 1000UL) {
+        (gFetchNow || (millis() - lastFetchMs) >= cfg.refreshSec * 1000UL)) {
+        gFetchNow = false;
         lastFetchMs = millis();
         fetchAndDisplay();
     }
