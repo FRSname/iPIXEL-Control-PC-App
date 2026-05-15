@@ -37,11 +37,22 @@ def emit_icon():
         img = img.resize((16, 16), Image.NEAREST)
     w, h = img.size
 
-    # Flatten to RGB on black bg (alpha-composited) so the on-device drawer
-    # doesn't need to handle partial transparency.
+    # RGB array — alpha-composited onto black so the colour values are stable
+    # even though we won't draw the transparent pixels at runtime.
     bg = Image.new("RGB", (w, h), (0, 0, 0))
     bg.paste(img, mask=img.split()[3])
     px = list(bg.getdata())
+
+    # 1-bit alpha mask, packed LSB-first per byte, row-major. The renderer
+    # uses it to skip transparent pixels so the user's background colour
+    # shows through (instead of a black square behind the icon).
+    alpha = list(img.split()[3].getdata())
+    n_bits  = w * h
+    n_bytes = (n_bits + 7) // 8
+    mask = bytearray(n_bytes)
+    for i, a in enumerate(alpha):
+        if a > 128:
+            mask[i >> 3] |= 1 << (i & 7)
 
     lines = []
     lines.append("// Auto-generated from Gallery/Sprites/Instagram.png by tools/sprites_to_h.py")
@@ -58,8 +69,15 @@ def emit_icon():
     for i in range(0, len(chunks), 8):
         lines.append("    " + ",".join(chunks[i:i+8]) + ",")
     lines.append("};")
+    lines.append("")
+    lines.append(f"// 1-bit alpha mask: bit set = draw pixel, bit clear = leave bg alone.")
+    lines.append(f"static const uint8_t IG_ICON_MASK[{n_bytes}] PROGMEM = {{")
+    mask_chunks = [f"0x{b:02X}" for b in mask]
+    for i in range(0, len(mask_chunks), 8):
+        lines.append("    " + ",".join(mask_chunks[i:i+8]) + ",")
+    lines.append("};")
     OUT_ICON.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {OUT_ICON.relative_to(OUT_ICON.parents[2])}  ({len(px)*3} bytes data)")
+    print(f"wrote {OUT_ICON.relative_to(OUT_ICON.parents[2])}  ({len(px)*3} bytes RGB + {n_bytes} bytes mask)")
 
 
 def emit_font():

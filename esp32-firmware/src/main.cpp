@@ -90,10 +90,22 @@ static void fetchAndDisplay() {
     Serial.printf("[ig] @%s — %u followers\n", r.username.c_str(), r.followerCount);
     webUiSetStatus(r.username, r.followerCount, "");
 
-    if (r.followerCount != lastFollowerCount) {
-        String newText = formatForDisplay(r.followerCount, r.username, cfg.formatMode);
+    String newText = formatForDisplay(r.followerCount, r.username, cfg.formatMode);
+    static uint32_t lastTextColor = 0xFFFFFFFEu;   // sentinel — never matches a saved 24-bit colour
+    static uint32_t lastBgColor   = 0xFFFFFFFEu;
+    bool textChanged   = (newText != lastDisplayText);
+    bool colourChanged = (cfg.textColor != lastTextColor) || (cfg.bgColor != lastBgColor);
+    if (textChanged) {
         animateTo(newText);
+    } else if (colourChanged && lastDisplayText.length() > 0) {
+        rendererStaticFrame(fb, newText.c_str(), cfg.textColor, cfg.bgColor);
+        pushFrame();
+        lastDisplayText = newText;
+    }
+    if (textChanged || colourChanged) {
         lastFollowerCount = r.followerCount;
+        lastTextColor     = cfg.textColor;
+        lastBgColor       = cfg.bgColor;
     }
 }
 

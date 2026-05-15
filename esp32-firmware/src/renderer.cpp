@@ -20,10 +20,13 @@ void rendererFillBg(uint8_t* fb, uint32_t bg) {
 void rendererDrawInstagramIcon(uint8_t* fb) {
     for (int y = 0; y < IG_ICON_H; ++y) {
         for (int x = 0; x < IG_ICON_W; ++x) {
-            size_t idx = ((size_t)y * IG_ICON_W + x) * 3;
-            uint8_t r = pgm_read_byte(&IG_ICON_RGB[idx + 0]);
-            uint8_t g = pgm_read_byte(&IG_ICON_RGB[idx + 1]);
-            uint8_t b = pgm_read_byte(&IG_ICON_RGB[idx + 2]);
+            size_t i = (size_t)y * IG_ICON_W + x;
+            uint8_t maskByte = pgm_read_byte(&IG_ICON_MASK[i >> 3]);
+            if (!(maskByte & (1u << (i & 7)))) continue;   // transparent — leave bg
+            size_t off = i * 3;
+            uint8_t r = pgm_read_byte(&IG_ICON_RGB[off + 0]);
+            uint8_t g = pgm_read_byte(&IG_ICON_RGB[off + 1]);
+            uint8_t b = pgm_read_byte(&IG_ICON_RGB[off + 2]);
             putPixel(fb, x, y, ((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
         }
     }
