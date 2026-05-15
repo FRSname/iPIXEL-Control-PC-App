@@ -199,19 +199,26 @@ static bool tryConnect() {
     // Format: [8, 0, 1, 0x80, hour, minute, second, language=0]
     while (xSemaphoreTake(g_ackSem, 0) == pdTRUE) {}
     uint8_t initCmd[8] = { 8, 0, 1, 0x80, 0, 0, 0, 0 };
-    // Current wall-clock isn't synced yet; sending zeros works (the panel
-    // accepts any byte values here — only the command shape matters).
     if (!g_writeChar->writeValue(initCmd, sizeof(initCmd), true)) {
         Serial.println("[ble] init handshake write failed");
         g_client->disconnect();
         return false;
     }
-    // Wait briefly for the device-info response (we don't parse it — we just
-    // need the panel to consider the session "established").
     if (xSemaphoreTake(g_ackSem, pdMS_TO_TICKS(1500)) != pdTRUE) {
         Serial.println("[ble] init handshake: no response (continuing anyway)");
     } else {
         Serial.println("[ble] init handshake OK");
+    }
+
+    // Belt-and-braces: explicitly power the panel on. The desktop app exposes
+    // this in the Settings page but doesn't call it automatically — including
+    // it here is harmless if the panel is already on.
+    // pypixelcolor set_power command: [5, 0, 7, 1, on?1:0]
+    while (xSemaphoreTake(g_ackSem, 0) == pdTRUE) {}
+    uint8_t powerCmd[5] = { 5, 0, 7, 1, 1 };
+    if (g_writeChar->writeValue(powerCmd, sizeof(powerCmd), true)) {
+        xSemaphoreTake(g_ackSem, pdMS_TO_TICKS(500));
+        Serial.println("[ble] set_power(on) sent");
     }
 
     Serial.printf("[ble] connected (MTU=%u)\n", (unsigned)g_client->getMTU());
@@ -240,6 +247,22 @@ bool ipixelBleSendFrame(const uint8_t* fb) {
         return false;
     }
     uint32_t pngCrc = crc32Std(png, pngLen);
+
+    // Dump the first PNG we transmit so we can verify it decodes correctly on
+    // a PC (paste the hex into `bytes.fromhex(...)`, then PIL/imagemagick).
+    // Only fires once per boot — flips off after the first send.
+    static bool s_dumpPng = true;
+    if (s_dumpPng) {
+        s_dumpPng = false;
+        Serial.printf("[ble] PNG dump (%u bytes, CRC=0x%08x) BEGIN\n",
+                      (unsigned)pngLen, (unsigned)pngCrc);
+        for (size_t i = 0; i < pngLen; ++i) {
+            Serial.printf("%02x", png[i]);
+            if ((i & 31) == 31) Serial.println();
+        }
+        if (pngLen & 31) Serial.println();
+        Serial.println("[ble] PNG dump END");
+    }
 
     // Single window suffices: 64x16 fits well below the 12KB window limit.
     // Frame body = [0x02 0x00 option(3)] + [size(4)] + [crc(4)] + [0x00 slot(2)] + payload
