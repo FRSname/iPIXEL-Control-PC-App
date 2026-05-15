@@ -233,7 +233,7 @@ void ipixelBleTick() {
 bool ipixelBleSendFrame(const uint8_t* fb) {
     if (!ipixelBleIsConnected()) return false;
 
-    static uint8_t png[3300];   // 64x16 PNG always fits ~3156 bytes
+    static uint8_t png[3800];   // 64x16 PNG fits within ~3540 bytes (fixed-Huffman worst case)
     size_t pngLen = pngEncode64x16RGB(fb, png, sizeof(png));
     if (pngLen == 0) {
         Serial.println("[ble] PNG encode failed");
@@ -244,7 +244,7 @@ bool ipixelBleSendFrame(const uint8_t* fb) {
     // Single window suffices: 64x16 fits well below the 12KB window limit.
     // Frame body = [0x02 0x00 option(3)] + [size(4)] + [crc(4)] + [0x00 slot(2)] + payload
     const size_t bodyLen = 3 + 4 + 4 + 2 + pngLen;
-    static uint8_t frame[3400];
+    static uint8_t frame[4000];
     if (bodyLen + 2 > sizeof(frame)) return false;
 
     uint16_t prefix = (uint16_t)(2 + bodyLen);

@@ -46,16 +46,81 @@ static void writeChunk(uint8_t*& p, const char* type, const uint8_t* data, size_
     writeBE32(p, crc); p += 4;
 }
 
+// =============================================================================
+// Fixed-Huffman deflate (RFC 1951 §3.2.6). We never emit LZ77 matches — every
+// input byte becomes a literal — but the bytes still go through the standard
+// fixed-Huffman code table, which produces a valid (if uncompressed-on-average)
+// deflate stream that all standard PNG decoders accept.
+//
+// Bit packing per §3.1.1:
+//   - Non-Huffman fields (BFINAL, BTYPE) are packed LSB-first.
+//   - Huffman codes are emitted MSB-first.
+// In both cases bits accumulate LSB-first within each output byte.
+// =============================================================================
+
+struct BitWr {
+    uint8_t* out;
+    size_t   pos;
+    uint8_t  acc;
+    int      nbits;
+};
+
+static inline void bwBit(BitWr& w, int bit) {
+    if (bit) w.acc |= (uint8_t)(1 << w.nbits);
+    if (++w.nbits == 8) { w.out[w.pos++] = w.acc; w.acc = 0; w.nbits = 0; }
+}
+
+static void bwPutLSB(BitWr& w, uint32_t val, int count) {
+    for (int i = 0; i < count; ++i) bwBit(w, (val >> i) & 1);
+}
+
+static void bwPutHuff(BitWr& w, uint32_t code, int count) {
+    for (int i = count - 1; i >= 0; --i) bwBit(w, (code >> i) & 1);
+}
+
+static void bwFlush(BitWr& w) {
+    if (w.nbits > 0) { w.out[w.pos++] = w.acc; w.acc = 0; w.nbits = 0; }
+}
+
+static size_t deflateFixedHuffman(const uint8_t* data, size_t dataLen, uint8_t* out) {
+    BitWr w = { out, 0, 0, 0 };
+    bwPutLSB(w, 1, 1);    // BFINAL = 1 (last block)
+    bwPutLSB(w, 1, 2);    // BTYPE  = 01 (fixed Huffman)
+
+    for (size_t i = 0; i < dataLen; ++i) {
+        uint8_t b = data[i];
+        if (b < 144) bwPutHuff(w, 0x30u  + b,           8);   // literals 0–143
+        else         bwPutHuff(w, 0x190u + (b - 144),   9);   // literals 144–255
+    }
+    bwPutHuff(w, 0, 7);   // end-of-block symbol (literal 256, 7-bit code 0)
+    bwFlush(w);
+    return w.pos;
+}
+
 size_t pngEncode64x16RGB(const uint8_t* fb, uint8_t* out, size_t outCap) {
-    const int W = 64, H = 16;
-    const size_t rowStride = (size_t)1 + W * 3;       // 1 filter byte + RGB row
-    const size_t rawLen    = (size_t)H * rowStride;   // 16 * 193 = 3088
-    // Computed PNG size: 8 (sig) + 25 (IHDR) + 4+4+2+5+rawLen+4+4 (IDAT) + 12 (IEND)
-    const size_t expected = 8 + 25 + (12 + 2 + 5 + rawLen + 4) + 12;
+    const int    W         = 64;
+    const int    H         = 16;
+    const size_t rowStride = (size_t)1 + W * 3;        // 1 filter byte + RGB row
+    const size_t rawLen    = (size_t)H * rowStride;    // 3088
+
+    static uint8_t raw[3100];
+    if (rawLen > sizeof(raw)) return 0;
+    for (int y = 0; y < H; ++y) {
+        raw[y * rowStride] = 0; // filter = None
+        memcpy(raw + y * rowStride + 1, fb + (size_t)y * W * 3, W * 3);
+    }
+
+    // Worst case fixed-Huffman output for `rawLen` literal bytes is
+    // (9 * rawLen + 7 + 3 + 7) / 8 ≈ rawLen * 9/8 + 3. Round up generously.
+    static uint8_t deflated[3520];
+    size_t defLen = deflateFixedHuffman(raw, rawLen, deflated);
+    if (defLen == 0 || defLen > sizeof(deflated)) return 0;
+
+    // 8 (sig) + 25 (IHDR) + 4+4+2+defLen+4+4 (IDAT) + 12 (IEND).
+    const size_t expected = 8 + 25 + (12 + 2 + defLen + 4) + 12;
     if (outCap < expected) return 0;
 
     uint8_t* p = out;
-
     static const uint8_t SIG[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     memcpy(p, SIG, 8); p += 8;
 
@@ -64,39 +129,21 @@ size_t pngEncode64x16RGB(const uint8_t* fb, uint8_t* out, size_t outCap) {
     writeBE32(ihdr + 4, H);
     ihdr[8]  = 8;   // bit depth
     ihdr[9]  = 2;   // colour type = truecolour RGB
-    ihdr[10] = 0;   // compression = deflate
-    ihdr[11] = 0;   // filter
-    ihdr[12] = 0;   // no interlace
+    ihdr[10] = 0;   // compression method = deflate
+    ihdr[11] = 0;   // filter method = adaptive
+    ihdr[12] = 0;   // not interlaced
     writeChunk(p, "IHDR", ihdr, 13);
 
-    // IDAT chunk — patch length once payload is assembled
     uint8_t* idatLenPos = p;
     writeBE32(p, 0); p += 4;
     uint8_t* idatTypeAndData = p;
     memcpy(p, "IDAT", 4); p += 4;
 
     uint8_t* zlibStart = p;
-    *p++ = 0x78; // CMF: deflate, 32K window
-    *p++ = 0x01; // FLG: fastest, no preset dict (FCHECK adjusted so (CMF*256+FLG)%31==0)
-
-    // One stored (uncompressed) deflate block holding the whole image.
-    *p++ = 0x01; // BFINAL=1, BTYPE=00, pad bits = 0
-    uint16_t blockLen = (uint16_t)rawLen;
-    *p++ = (uint8_t)(blockLen & 0xFF);
-    *p++ = (uint8_t)((blockLen >> 8) & 0xFF);
-    uint16_t nblockLen = (uint16_t)~blockLen;
-    *p++ = (uint8_t)(nblockLen & 0xFF);
-    *p++ = (uint8_t)((nblockLen >> 8) & 0xFF);
-
-    uint8_t* rawStart = p;
-    for (int y = 0; y < H; ++y) {
-        *p++ = 0; // filter = None
-        memcpy(p, fb + (size_t)y * W * 3, W * 3);
-        p += W * 3;
-    }
-
-    uint32_t adl = adler32(rawStart, rawLen);
-    writeBE32(p, adl); p += 4;
+    *p++ = 0x78;    // CMF: deflate, 32 KB window
+    *p++ = 0x9C;    // FLG: default compression level, FCHECK satisfies (CMF*256+FLG) % 31 == 0
+    memcpy(p, deflated, defLen); p += defLen;
+    writeBE32(p, adler32(raw, rawLen)); p += 4;
 
     size_t zlibLen = (size_t)(p - zlibStart);
     writeBE32(idatLenPos, (uint32_t)zlibLen);
