@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iPixel IG Counter</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:1rem; max-width:480px; }
+  h1 { font-size:1.1rem; margin:0 0 1rem; letter-spacing:.05em; }
+  .card { background:#1c1c1c; border:1px solid #2a2a2a; border-radius:8px; padding:1rem; margin-bottom:1rem; }
+  label { display:block; font-size:.8rem; opacity:.7; margin-bottom:.25rem; }
+  input, select { width:100%; box-sizing:border-box; padding:.6rem; background:#000; color:#eee; border:1px solid #333; border-radius:6px; font-size:1rem; }
+  input[type=color] { padding:.1rem; height:2.5rem; }
+  .row { display:flex; gap:.75rem; margin-bottom:.75rem; }
+  .row > div { flex:1; }
+  button { width:100%; padding:.8rem; background:#3a7bd5; color:#fff; border:none; border-radius:6px; font-size:1rem; font-weight:600; cursor:pointer; margin-top:.5rem; }
+  button.secondary { background:#333; }
+  .status { font-family: ui-monospace, monospace; font-size:.85rem; line-height:1.6; opacity:.85; }
+  .ok { color:#7dd87d; }
+  .err { color:#ff6b6b; word-break:break-word; }
+</style>
+</head>
+<body>
+<h1>iPixel · Instagram Counter</h1>
+
+<div class="card">
+  <div class="status" id="status">loading…</div>
+</div>
+
+<div class="card">
+  <label>Instagram Business Account ID</label>
+  <input id="ig_user_id" placeholder="17841...">
+
+  <label style="margin-top:.75rem">Access token (write-only)</label>
+  <input id="access_token" type="password" placeholder="leave blank to keep existing">
+
+  <div class="row" style="margin-top:.75rem">
+    <div>
+      <label>Refresh (sec)</label>
+      <input id="refresh_sec" type="number" min="60" value="300">
+    </div>
+    <div>
+      <label>Format</label>
+      <select id="format_mode">
+        <option value="0">1433</option>
+        <option value="1">1433 (full)</option>
+        <option value="2">@user 1.4K</option>
+        <option value="3">FOLLOWERS 1.4K</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label>Text colour</label>
+      <input id="text_color" type="color" value="#ffffff">
+    </div>
+    <div>
+      <label>Background</label>
+      <input id="bg_color" type="color" value="#000000">
+    </div>
+  </div>
+
+  <label style="margin-top:.5rem">Panel MAC (optional — empty = auto-scan)</label>
+  <input id="panel_mac" placeholder="aa:bb:cc:dd:ee:ff">
+
+  <button id="save">Save</button>
+</div>
+
+<script>
+async function loadAll() {
+  const [cfg, st] = await Promise.all([
+    fetch('/api/config').then(r => r.json()),
+    fetch('/api/status').then(r => r.json()),
+  ]);
+  document.getElementById('ig_user_id').value = cfg.ig_user_id || '';
+  document.getElementById('refresh_sec').value = cfg.refresh_sec || 300;
+  document.getElementById('format_mode').value = String(cfg.format_mode ?? 0);
+  document.getElementById('text_color').value = cfg.text_color || '#ffffff';
+  document.getElementById('bg_color').value = cfg.bg_color || '#000000';
+  document.getElementById('panel_mac').value = cfg.panel_mac || '';
+  if (!cfg.has_token) document.getElementById('access_token').placeholder = 'no token set — paste one to save';
+
+  const s = document.getElementById('status');
+  s.innerHTML =
+    `IP: ${st.ip} &nbsp; RSSI: ${st.rssi} dBm<br>` +
+    (st.last_error
+      ? `<span class="err">last error: ${st.last_error}</span>`
+      : `<span class="ok">@${st.username || '—'} · ${st.count} followers</span>`);
+}
+
+document.getElementById('save').addEventListener('click', async () => {
+  const body = {
+    ig_user_id:  document.getElementById('ig_user_id').value.trim(),
+    refresh_sec: parseInt(document.getElementById('refresh_sec').value, 10) || 300,
+    format_mode: parseInt(document.getElementById('format_mode').value, 10) || 0,
+    text_color:  document.getElementById('text_color').value,
+    bg_color:    document.getElementById('bg_color').value,
+    panel_mac:   document.getElementById('panel_mac').value.trim(),
+  };
+  const tok = document.getElementById('access_token').value;
+  if (tok) body.access_token = tok;
+  const r = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    document.getElementById('access_token').value = '';
+    loadAll();
+  } else {
+    alert('save failed');
+  }
+});
+
+loadAll();
+setInterval(loadAll, 5000);
+</script>
+</body>
+</html>

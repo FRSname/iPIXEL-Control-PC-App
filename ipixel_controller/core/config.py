@@ -105,7 +105,7 @@ class ConfigManager:
         'instagram_use_sprite_font': True,
         'instagram_sprite_font_name': 'Text Default',
         'instagram_layout': 'icon',
-        'instagram_animate_changes': True,
+        'instagram_animation_style': 'cascade',
 
         # Display delays
         'text_static_delay_seconds': 2,

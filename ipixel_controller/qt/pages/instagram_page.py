@@ -213,14 +213,30 @@ class InstagramPage(Page):
         self.refresh_interval.setSuffix(" s")
         rform.addRow("Interval", self.refresh_interval)
         ref.add_layout(rform)
-        self.animate_check = QCheckBox("Animate when the count changes")
-        self.animate_check.setChecked(
-            bool(self._config.get_setting("instagram_animate_changes", True))
+        anim_row = QHBoxLayout()
+        anim_row.addWidget(QLabel("Animation"))
+        self.animation_style_combo = QComboBox()
+        self.animation_style_combo.addItem("Cascade (slot machine)", "cascade")
+        self.animation_style_combo.addItem("Simple (count up, safe for BLE)", "simple")
+        self.animation_style_combo.addItem("Off (instant change)", "off")
+        # Migrate the old animate_changes bool: True → cascade, False → off.
+        last_style = self._config.get_setting("instagram_animation_style", None)
+        if last_style is None:
+            legacy = self._config.get_setting("instagram_animate_changes", None)
+            last_style = (
+                "cascade" if legacy is None or bool(legacy) else "off"
+            )
+        idx = self.animation_style_combo.findData(last_style)
+        if idx >= 0:
+            self.animation_style_combo.setCurrentIndex(idx)
+        self.animation_style_combo.currentIndexChanged.connect(
+            lambda: self._config.set_setting(
+                "instagram_animation_style",
+                self.animation_style_combo.currentData(),
+            )
         )
-        self.animate_check.toggled.connect(
-            lambda v: self._config.set_setting("instagram_animate_changes", bool(v))
-        )
-        ref.add(self.animate_check)
+        anim_row.addWidget(self.animation_style_combo, 1)
+        ref.add_layout(anim_row)
         self.content_layout().addWidget(ref)
 
         # ---- Actions
@@ -239,6 +255,28 @@ class InstagramPage(Page):
         row.addWidget(save_preset_btn)
         row.addStretch()
         self.content_layout().addLayout(row)
+
+        # ---- Debug — simulate count changes without hitting the API.
+        # Lets us iterate on animation tuning without burning rate limit.
+        debug = Card(title="Debug — test animation")
+        dbg_row = QHBoxLayout()
+        dbg_row.addWidget(QLabel("Delta:"))
+        for label, delta in (("+1", 1), ("+5", 5), ("+50", 50), ("+1000", 1000), ("−1", -1)):
+            btn = QPushButton(label)
+            btn.setFixedWidth(56)
+            btn.clicked.connect(lambda _checked=False, d=delta: self._test_delta(d))
+            dbg_row.addWidget(btn)
+        dbg_row.addSpacing(12)
+        reset_btn = QPushButton("Reset baseline")
+        reset_btn.setToolTip(
+            "Clear the 'last displayed' value so the next test acts like a "
+            "first send (no animation)."
+        )
+        reset_btn.clicked.connect(self._test_reset_baseline)
+        dbg_row.addWidget(reset_btn)
+        dbg_row.addStretch()
+        debug.add_layout(dbg_row)
+        self.content_layout().addWidget(debug)
 
         self.on_connection_changed(self._device.is_connected)
 
@@ -321,12 +359,9 @@ class InstagramPage(Page):
 
         new_count = int(self._current.get("follower_count", 0))
         prev = self._last_sent_count
+        style = self._animation_style()
 
-        if (
-            self.animate_check.isChecked()
-            and prev is not None
-            and new_count != prev
-        ):
+        if style != "off" and prev is not None and new_count != prev:
             self._start_count_animation(prev, new_count)
         else:
             err = self._render_and_send(new_count)
@@ -371,31 +406,76 @@ class InstagramPage(Page):
     # Frame cadence is bounded below by BLE throughput: full 64×16 image
     # uploads at < ~320 ms intervals cause the bridge to disconnect after
     # consecutive timeouts. The ease-in-out profile keeps intervals
-    # comfortably above that floor.
-    ANIM_INTERVAL_MIN_MS = 340  # peak speed in the middle of the animation
-    ANIM_INTERVAL_MAX_MS = 540  # slow ramp at the start and end
+    # comfortably above that floor, but with a small range so the cadence
+    # stays close to "as fast as the link allows" — a wider range felt
+    # laggy because the slow ramp at the edges dominated the perception.
+    ANIM_INTERVAL_MIN_MS = 320  # peak speed in the middle of the animation
+    ANIM_INTERVAL_MAX_MS = 420  # gentle ramp at the start and end
     # Each digit position locks one frame after the one to its left;
     # ANIM_PRE_LOCK_FRAMES is how many full rolls happen before the
-    # leftmost digit settles. Higher = more rolling visible up front.
-    ANIM_PRE_LOCK_FRAMES = 2
+    # leftmost digit settles. Higher = more synchronized rolling up
+    # front, which makes the cascade feel less "tail-heavy".
+    ANIM_PRE_LOCK_FRAMES = 3
+    # Hold the final value for one extra tick so the lock doesn't look
+    # like an abrupt stop — gives the animation a sense of "settling".
+    ANIM_FINAL_HOLD_MS = 0  # 0 = no hold (rely on the long edge interval)
+
+    def _animation_style(self) -> str:
+        """Currently-selected style: 'cascade', 'simple', or 'off'."""
+        data = self.animation_style_combo.currentData()
+        return data if data in ("cascade", "simple", "off") else "cascade"
 
     def _start_count_animation(self, from_count: int, to_count: int) -> None:
-        """Schedule a left-to-right digit cascade transitioning to ``to_count``.
-
-        Each digit position locks one frame after its left neighbour, so
-        the number is revealed gradually rather than every digit settling
-        at once. Inter-frame intervals follow an ease-in-out (cosine)
-        profile so the animation starts and ends gently.
+        """Schedule a transition between ``from_count`` and ``to_count``
+        using the currently-selected animation style.
         """
         if from_count == to_count:
             self._render_and_send(to_count)
             return
 
-        self._anim_frames, self._anim_intervals = self._build_cascade_frames(
-            to_count
-        )
+        style = self._animation_style()
+        if style == "simple":
+            self._anim_frames, self._anim_intervals = self._build_simple_frames(
+                from_count, to_count
+            )
+        else:
+            self._anim_frames, self._anim_intervals = self._build_cascade_frames(
+                to_count
+            )
         self._anim_index = 0
         self._anim_tick()
+
+    SIMPLE_INTERVAL_MS = 500  # uniform; very safe for BLE-flaky setups
+    SIMPLE_MAX_FRAMES = 4
+
+    def _build_simple_frames(self, from_count: int, to_count: int):
+        """Plain linear count from ``from_count`` to ``to_count``.
+
+        At most 4 frames, uniform 500 ms intervals — chosen so the total
+        BLE write rate stays well below where the bridge starts dropping
+        the connection. For tiny deltas (≤4) shows each integer step;
+        for larger deltas eases across 4 frames.
+        """
+        delta = to_count - from_count
+        abs_delta = abs(delta)
+
+        if abs_delta == 0:
+            return [to_count], []
+
+        if abs_delta <= self.SIMPLE_MAX_FRAMES:
+            step = 1 if delta > 0 else -1
+            frames = [from_count + step * (i + 1) for i in range(abs_delta)]
+        else:
+            n = self.SIMPLE_MAX_FRAMES
+            frames = []
+            for i in range(1, n + 1):
+                t = i / n
+                t = 1 - (1 - t) ** 2  # ease-out quad
+                frames.append(round(from_count + delta * t))
+            frames[-1] = to_count
+
+        intervals = [self.SIMPLE_INTERVAL_MS] * (len(frames) - 1)
+        return frames, intervals
 
     def _build_cascade_frames(self, target: int):
         """Return (frames, intervals).
@@ -551,6 +631,50 @@ class InstagramPage(Page):
         self._refresh_timer.stop()
         self._anim_timer.stop()
 
+    # ------------------------------------------------------------------ debug
+    def _test_delta(self, delta: int) -> None:
+        """Simulate a follower-count change by ``delta`` from the currently
+        displayed value (or a sensible default if nothing's been sent yet).
+
+        Bypasses the API entirely — injects synthetic ``self._current`` /
+        ``self._last_sent_count`` and routes through the normal ``_send``
+        path so the animation behaves exactly like the live one.
+        """
+        if not self._device.is_connected:
+            QMessageBox.warning(self, "Not connected", "Connect to a device first.")
+            return
+        base = self._last_sent_count
+        if base is None:
+            # First test — pick something with enough digits to show the
+            # cascade properly.
+            base = 1433
+        new_count = max(0, base + delta)
+
+        # Synthesise the data dict that _send / _render_and_send expect.
+        if not self._current:
+            self._current = {
+                "ig_user_id": "debug",
+                "username": "debug",
+                "name": "debug",
+                "follower_count": new_count,
+                "follows_count": 0,
+                "media_count": 0,
+            }
+        else:
+            self._current = dict(self._current)
+            self._current["follower_count"] = new_count
+
+        self._last_sent_count = base
+        self._set_status(f"TEST: {base} → {new_count}")
+        self._send()
+
+    def _test_reset_baseline(self) -> None:
+        """Forget the last displayed value so the next test triggers no
+        animation (mirrors what happens right after a reconnect)."""
+        self._last_sent_count = None
+        self._anim_timer.stop()
+        self._set_status("Baseline cleared. Next test will skip the animation.")
+
     def _on_font_change(self) -> None:
         self._config.set_setting(
             "instagram_use_sprite_font", self.font_picker.use_sprite
@@ -594,7 +718,7 @@ class InstagramPage(Page):
             "bg_color": self.bg_color.color,
             "auto_refresh": self.refresh_check.isChecked(),
             "refresh_interval": self.refresh_interval.value(),
-            "animate_changes": self.animate_check.isChecked(),
+            "animation_style": self._animation_style(),
             "instagram_use_sprite_font": self.font_picker.use_sprite,
             "instagram_sprite_font_name": self.font_picker.font_name,
         }
@@ -616,8 +740,18 @@ class InstagramPage(Page):
         self.bg_color.set_color(preset.get("bg_color", "#833AB4"))
         self.refresh_check.setChecked(bool(preset.get("auto_refresh", False)))
         self.refresh_interval.setValue(int(preset.get("refresh_interval", 300)))
-        if "animate_changes" in preset:
-            self.animate_check.setChecked(bool(preset.get("animate_changes", True)))
+        # New preset key takes precedence; legacy `animate_changes` bool is
+        # mapped to cascade/off so old presets keep working.
+        if "animation_style" in preset:
+            style = preset.get("animation_style", "cascade")
+        elif "animate_changes" in preset:
+            style = "cascade" if preset.get("animate_changes") else "off"
+        else:
+            style = None
+        if style is not None:
+            idx = self.animation_style_combo.findData(style)
+            if idx >= 0:
+                self.animation_style_combo.setCurrentIndex(idx)
         if "instagram_use_sprite_font" in preset:
             self.font_picker.set_use_sprite(
                 bool(preset.get("instagram_use_sprite_font", True))
