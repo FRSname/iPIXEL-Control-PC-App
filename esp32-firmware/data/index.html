@@ -8,6 +8,7 @@
   :root { color-scheme: dark; }
   body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:1rem; max-width:480px; }
   h1 { font-size:1.1rem; margin:0 0 1rem; letter-spacing:.05em; }
+  h2 { font-size:.85rem; margin:0 0 .75rem; opacity:.7; text-transform:uppercase; letter-spacing:.08em; }
   .card { background:#1c1c1c; border:1px solid #2a2a2a; border-radius:8px; padding:1rem; margin-bottom:1rem; }
   label { display:block; font-size:.8rem; opacity:.7; margin-bottom:.25rem; }
   input, select { width:100%; box-sizing:border-box; padding:.6rem; background:#000; color:#eee; border:1px solid #333; border-radius:6px; font-size:1rem; }
@@ -16,21 +17,33 @@
   .row > div { flex:1; }
   button { width:100%; padding:.8rem; background:#3a7bd5; color:#fff; border:none; border-radius:6px; font-size:1rem; font-weight:600; cursor:pointer; margin-top:.5rem; }
   button.secondary { background:#333; }
-  .status { font-family: ui-monospace, monospace; font-size:.85rem; line-height:1.6; opacity:.85; }
-  .ok { color:#7dd87d; }
+  button.danger { background:#8b2c2c; }
+  button:disabled { opacity:.5; cursor:default; }
+  .status { font-family: ui-monospace, monospace; font-size:.85rem; line-height:1.6; opacity:.9; }
+  .ok  { color:#7dd87d; }
   .err { color:#ff6b6b; word-break:break-word; }
+  .dim { color:#aaa; }
+  .devices { list-style:none; margin:.5rem 0 0; padding:0; }
+  .devices li { padding:.6rem; background:#101010; border:1px solid #2a2a2a; border-radius:6px; margin-bottom:.4rem; cursor:pointer; font-size:.9rem; }
+  .devices li:hover { border-color:#3a7bd5; }
+  .devices li.picked { border-color:#7dd87d; background:#0c1a0c; }
+  .devices li .mac { font-family: ui-monospace, monospace; font-size:.8rem; opacity:.7; }
+  .devices li .rssi { float:right; opacity:.6; font-size:.8rem; }
+  .empty { font-size:.85rem; opacity:.6; padding:.4rem 0; }
 </style>
 </head>
 <body>
 <h1>iPixel · Instagram Counter</h1>
 
 <div class="card">
+  <h2>Status</h2>
   <div class="status" id="status">loading…</div>
 </div>
 
 <div class="card">
-  <label>Instagram Business Account ID</label>
-  <input id="ig_user_id" placeholder="17841...">
+  <h2>Instagram</h2>
+  <label>Business Account ID</label>
+  <input id="ig_user_id" placeholder="17841…">
 
   <label style="margin-top:.75rem">Access token (write-only)</label>
   <input id="access_token" type="password" placeholder="leave blank to keep existing">
@@ -62,33 +75,102 @@
     </div>
   </div>
 
-  <label style="margin-top:.5rem">Panel MAC (optional — empty = auto-scan)</label>
-  <input id="panel_mac" placeholder="aa:bb:cc:dd:ee:ff">
-
   <button id="save">Save</button>
 </div>
 
-<script>
-async function loadAll() {
-  const [cfg, st] = await Promise.all([
-    fetch('/api/config').then(r => r.json()),
-    fetch('/api/status').then(r => r.json()),
-  ]);
-  document.getElementById('ig_user_id').value = cfg.ig_user_id || '';
-  document.getElementById('refresh_sec').value = cfg.refresh_sec || 300;
-  document.getElementById('format_mode').value = String(cfg.format_mode ?? 0);
-  document.getElementById('text_color').value = cfg.text_color || '#ffffff';
-  document.getElementById('bg_color').value = cfg.bg_color || '#000000';
-  document.getElementById('panel_mac').value = cfg.panel_mac || '';
-  if (!cfg.has_token) document.getElementById('access_token').placeholder = 'no token set — paste one to save';
+<div class="card">
+  <h2>Bluetooth panel</h2>
+  <label>Panel MAC</label>
+  <input id="panel_mac" placeholder="aa:bb:cc:dd:ee:ff">
+  <button id="scan" class="secondary">Scan for panels</button>
+  <ul class="devices" id="devices"></ul>
+  <div class="empty" id="scan_empty">No devices yet — tap “Scan for panels”.</div>
+</div>
 
-  const s = document.getElementById('status');
-  s.innerHTML =
-    `IP: ${st.ip} &nbsp; RSSI: ${st.rssi} dBm<br>` +
-    (st.last_error
-      ? `<span class="err">last error: ${st.last_error}</span>`
-      : `<span class="ok">@${st.username || '—'} · ${st.count} followers</span>`);
+<div class="card">
+  <h2>Wi-Fi</h2>
+  <div class="status dim" id="wifi_info">—</div>
+  <button id="wifi_reset" class="danger">Forget Wi-Fi &amp; reboot</button>
+</div>
+
+<script>
+let lastDevices = [];
+let lastConfigMac = '';
+
+async function loadAll() {
+  try {
+    const [cfg, st] = await Promise.all([
+      fetch('/api/config').then(r => r.json()),
+      fetch('/api/status').then(r => r.json()),
+    ]);
+    document.getElementById('ig_user_id').value  = cfg.ig_user_id || '';
+    document.getElementById('refresh_sec').value = cfg.refresh_sec || 300;
+    document.getElementById('format_mode').value = String(cfg.format_mode ?? 0);
+    document.getElementById('text_color').value  = cfg.text_color || '#ffffff';
+    document.getElementById('bg_color').value    = cfg.bg_color   || '#000000';
+    if (document.activeElement.id !== 'panel_mac') {
+      document.getElementById('panel_mac').value = cfg.panel_mac || '';
+    }
+    lastConfigMac = cfg.panel_mac || '';
+    if (!cfg.has_token) document.getElementById('access_token').placeholder = 'no token set — paste one to save';
+
+    const ble = st.ble_connected ? `<span class="ok">BLE: ${st.ble}</span>` : `<span class="err">BLE: ${st.ble}</span>`;
+    const ig  = st.last_error
+      ? `<span class="err">IG: ${st.last_error}</span>`
+      : `<span class="ok">IG: @${st.username || '—'} · ${st.count} followers</span>`;
+    document.getElementById('status').innerHTML =
+      `IP: ${st.ip} · ${st.ssid || '(no ssid)'} · ${st.rssi} dBm<br>${ig}<br>${ble}`;
+    document.getElementById('wifi_info').textContent =
+      `Connected to "${st.ssid || ''}" @ ${st.rssi} dBm — ${st.ip}`;
+    renderDevices();
+  } catch (e) {
+    document.getElementById('status').innerHTML = `<span class="err">status fetch failed: ${e}</span>`;
+  }
 }
+
+function renderDevices() {
+  const ul = document.getElementById('devices');
+  const empty = document.getElementById('scan_empty');
+  ul.innerHTML = '';
+  const cur = document.getElementById('panel_mac').value.trim().toLowerCase();
+  if (!lastDevices.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  lastDevices.sort((a, b) => b.rssi - a.rssi);
+  for (const d of lastDevices) {
+    const li = document.createElement('li');
+    if (d.mac.toLowerCase() === cur) li.classList.add('picked');
+    li.innerHTML = `<span class="rssi">${d.rssi} dBm</span><strong>${d.name}</strong><br><span class="mac">${d.mac}</span>`;
+    li.addEventListener('click', () => {
+      document.getElementById('panel_mac').value = d.mac;
+      renderDevices();
+    });
+    ul.appendChild(li);
+  }
+}
+
+async function pollScan() {
+  try {
+    const s = await fetch('/api/scan').then(r => r.json());
+    lastDevices = s.devices || [];
+    renderDevices();
+    const btn = document.getElementById('scan');
+    if (s.scanning) {
+      btn.disabled = true;
+      btn.textContent = 'Scanning…';
+      setTimeout(pollScan, 600);
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Scan for panels';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+document.getElementById('scan').addEventListener('click', async () => {
+  document.getElementById('scan').disabled = true;
+  document.getElementById('scan').textContent = 'Starting…';
+  await fetch('/api/scan/start', { method: 'POST' });
+  pollScan();
+});
 
 document.getElementById('save').addEventListener('click', async () => {
   const params = new URLSearchParams();
@@ -112,6 +194,12 @@ document.getElementById('save').addEventListener('click', async () => {
   } else {
     alert('save failed (' + r.status + ')');
   }
+});
+
+document.getElementById('wifi_reset').addEventListener('click', async () => {
+  if (!confirm('Forget the saved Wi-Fi network and reboot?\n\nThe ESP32 will come up as the "iPixel-Setup" hotspot so you can pick a new one.')) return;
+  await fetch('/api/wifi_reset', { method: 'POST' });
+  document.body.innerHTML = '<h1 style="font-family:system-ui;color:#eee;background:#111;padding:2rem">Rebooting…<br><br><small style="opacity:.6">Reconnect to the "iPixel-Setup" Wi-Fi network on your phone.</small></h1>';
 });
 
 loadAll();

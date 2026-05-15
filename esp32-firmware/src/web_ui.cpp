@@ -1,7 +1,9 @@
 #include "web_ui.h"
+#include "ipixel_ble.h"
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 
 static AsyncWebServer server(80);
 static AppConfig* gCfg = nullptr;
@@ -13,6 +15,9 @@ static String   sLastError;
 // Set from the save handler so main's loop polls Instagram immediately rather
 // than waiting for the next refresh tick.
 volatile bool gFetchNow = false;
+// Set from /api/wifi_reset; main's loop wipes saved Wi-Fi creds and reboots
+// (which falls back to the WiFiManager AP portal on next start).
+volatile bool gWifiReset = false;
 
 static String hexColor(uint32_t c) {
     char buf[8];
@@ -72,10 +77,45 @@ void webUiBegin(AppConfig& cfgRef) {
         d["count"]      = sCount;
         d["last_error"] = sLastError;
         d["ip"]         = WiFi.localIP().toString();
+        d["ssid"]       = WiFi.SSID();
         d["rssi"]       = WiFi.RSSI();
+        d["ble"]        = ipixelBleStatusText();
+        d["ble_connected"] = ipixelBleIsConnected();
         String out;
         serializeJson(d, out);
         req->send(200, "application/json", out);
+    });
+
+    // Kick off a 5-second BLE scan (non-blocking — results stream into the
+    // shared buffer as advertisements arrive). The web page polls /api/scan
+    // to display progress + results.
+    server.on("/api/scan/start", HTTP_POST, [](AsyncWebServerRequest* req) {
+        ipixelBleScanStart(5);
+        req->send(200, "application/json", "{\"ok\":true}");
+    });
+
+    server.on("/api/scan", HTTP_GET, [](AsyncWebServerRequest* req) {
+        JsonDocument d;
+        d["scanning"] = ipixelBleIsScanning();
+        auto results = ipixelBleScanResults();
+        JsonArray arr = d["devices"].to<JsonArray>();
+        for (auto& dev : results) {
+            JsonObject o = arr.add<JsonObject>();
+            o["name"] = dev.name;
+            o["mac"]  = dev.mac;
+            o["rssi"] = dev.rssi;
+        }
+        String out;
+        serializeJson(d, out);
+        req->send(200, "application/json", out);
+    });
+
+    // Wipes saved Wi-Fi creds and reboots. The portal AP "iPixel-Setup"
+    // comes up automatically on next boot because WiFiManager.autoConnect
+    // falls back to AP mode whenever it can't join a saved network.
+    server.on("/api/wifi_reset", HTTP_POST, [](AsyncWebServerRequest* req) {
+        gWifiReset = true;
+        req->send(200, "application/json", "{\"ok\":true}");
     });
 
     // POST form-encoded body to update config. Fields are optional; missing
@@ -105,14 +145,19 @@ void webUiBegin(AppConfig& cfgRef) {
         if (req->hasParam("bg_color", true)) {
             gCfg->bgColor = parseHexColor(req->getParam("bg_color", true)->value(), gCfg->bgColor);
         }
+        String oldMac = gCfg->panelMac;
         get("panel_mac", gCfg->panelMac);
 
         configSave(*gCfg);
-        Serial.printf("[cfg] saved: ig_id=%s has_tok=%d refresh=%u fmt=%u\n",
+        Serial.printf("[cfg] saved: ig_id=%s has_tok=%d refresh=%u fmt=%u mac=%s\n",
                       gCfg->igUserId.c_str(),
                       (int)(gCfg->accessToken.length() > 0),
                       (unsigned)gCfg->refreshSec,
-                      (unsigned)gCfg->formatMode);
+                      (unsigned)gCfg->formatMode,
+                      gCfg->panelMac.c_str());
+        if (!oldMac.equalsIgnoreCase(gCfg->panelMac)) {
+            ipixelBleSetPinnedMac(gCfg->panelMac);
+        }
         gFetchNow = true;
         req->send(200, "application/json", "{\"ok\":true}");
     });

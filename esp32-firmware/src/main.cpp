@@ -118,16 +118,27 @@ void setup() {
         Serial.println("[ig] no token configured — open the web UI to set one");
     }
 
-    // BLE connect attempt is best-effort; the firmware keeps running even if
-    // the panel is off. Reconnect logic lives in loop().
-    ipixelBleConnect(cfg.panelMac);
+    // BLE setup is best-effort; the firmware keeps running even if the panel
+    // is off. Reconnect cadence lives in ipixelBleTick() called from loop().
+    ipixelBleSetup(cfg.panelMac);
 
     lastFetchMs = millis() - cfg.refreshSec * 1000UL; // force first fetch immediately
 }
 
 extern volatile bool gFetchNow;
+extern volatile bool gWifiReset;
 
 void loop() {
+    if (gWifiReset) {
+        Serial.println("[wifi] forgetting saved credentials, rebooting…");
+        WiFi.disconnect(true, true);   // erase config + disconnect
+        WiFiManager().resetSettings(); // clears WiFiManager's NVS slot too
+        delay(300);
+        ESP.restart();
+    }
+
+    ipixelBleTick();
+
     if (configIsProvisioned(cfg) &&
         (gFetchNow || (millis() - lastFetchMs) >= cfg.refreshSec * 1000UL)) {
         gFetchNow = false;
