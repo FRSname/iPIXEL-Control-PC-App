@@ -6,3 +6,6 @@ google-api-python-client>=2.0.0
 requests>=2.31.0
 numpy>=1.24.0
 PySide6>=6.6.0
+# Optional: enables the embedded Pixilart editor in the Draw tab.
+# Skip if you'd rather the Draw tab opens Pixilart in your default browser.
+PySide6-Addons>=6.6.0

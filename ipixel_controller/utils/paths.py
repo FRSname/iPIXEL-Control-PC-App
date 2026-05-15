@@ -12,24 +12,53 @@ from typing import Optional
 
 def get_app_dir() -> str:
     """
-    Get the application's base directory.
+    User-writable application directory.
 
-    Works correctly whether running as a script or as a frozen executable.
+    Settings, presets, secrets, and playlists live here. In a frozen
+    PyInstaller bundle this is the folder containing the exe (writable).
+    In dev it's the repo root.
 
     Returns:
-        Absolute path to the application directory
+        Absolute path to the user-writable application directory.
     """
     if getattr(sys, 'frozen', False):
-        # Running as compiled executable
         return os.path.dirname(sys.executable)
-    else:
-        # Running as script - go up from utils/ to package root, then to app root
-        package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        # If we're in ipixel_controller/, go up one more level
-        if os.path.basename(package_dir) == 'ipixel_controller':
-            return os.path.dirname(package_dir)
-        else:
-            return package_dir
+    # Dev: go up from utils/ → ipixel_controller/ → repo root.
+    package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.basename(package_dir) == 'ipixel_controller':
+        return os.path.dirname(package_dir)
+    return package_dir
+
+
+def get_asset_dir() -> str:
+    """
+    Read-only bundled-assets directory.
+
+    Holds ``Gallery/``, ``playlists/`` etc. that ship with the app. In a
+    frozen PyInstaller bundle this is ``_MEIPASS`` — ``_internal/`` for
+    one-folder builds, the extracted temp dir for one-file builds. In
+    dev it's the same as :func:`get_app_dir`.
+
+    Returns:
+        Absolute path to the bundled-assets directory.
+    """
+    if getattr(sys, 'frozen', False):
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            return meipass
+    return get_app_dir()
+
+
+def _asset_search_roots() -> list:
+    """Bases to check, in order, when resolving a relative asset path."""
+    roots = []
+    seen = set()
+    for d in (get_app_dir(), get_asset_dir()):
+        key = os.path.normcase(os.path.normpath(d))
+        if key not in seen:
+            seen.add(key)
+            roots.append(d)
+    return roots
 
 
 def resolve_asset_path(path_value: str, base_dir: Optional[str] = None) -> str:
@@ -38,16 +67,19 @@ def resolve_asset_path(path_value: str, base_dir: Optional[str] = None) -> str:
 
     Handles:
     - Absolute paths (returned as-is)
-    - Relative paths (resolved relative to base_dir or app directory)
+    - Relative paths (resolved against ``base_dir`` if given; otherwise
+      tried against each entry of :func:`_asset_search_roots` and the
+      first existing match wins — falls back to the asset dir so callers
+      receive a deterministic path even when the file is missing)
     - User home directory expansion (~)
     - Empty paths (returns empty string)
 
     Args:
-        path_value: The path to resolve (can be relative or absolute)
-        base_dir: Base directory for relative paths (defaults to app directory)
+        path_value: The path to resolve (can be relative or absolute).
+        base_dir: Force a specific base directory; skips the search.
 
     Returns:
-        Absolute path string
+        Absolute path string.
     """
     if not path_value:
         return ""
@@ -59,11 +91,19 @@ def resolve_asset_path(path_value: str, base_dir: Optional[str] = None) -> str:
     if os.path.isabs(path_value):
         return os.path.normpath(path_value)
 
-    # Resolve relative to base directory
-    if base_dir is None:
-        base_dir = get_app_dir()
+    if base_dir is not None:
+        return os.path.normpath(os.path.join(base_dir, path_value))
 
-    return os.path.normpath(os.path.join(base_dir, path_value))
+    # Try each candidate root; first existing wins. This lets a frozen
+    # build resolve "Gallery/Sprites/foo.png" against either the exe
+    # folder (legacy config) or the _internal/ dir (bundled assets).
+    last = None
+    for root in _asset_search_roots():
+        candidate = os.path.normpath(os.path.join(root, path_value))
+        last = candidate
+        if os.path.exists(candidate):
+            return candidate
+    return last or os.path.normpath(path_value)
 
 
 def get_gallery_dir() -> str:

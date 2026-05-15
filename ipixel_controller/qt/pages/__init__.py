@@ -9,6 +9,8 @@ from .animation_page import AnimationPage
 from .stock_page import StockPage
 from .weather_page import WeatherPage
 from .youtube_page import YoutubePage
+from .instagram_page import InstagramPage
+from .draw_page import DrawPage
 from .settings_page import SettingsPage
 from .placeholder import PlaceholderPage
 
@@ -22,6 +24,8 @@ __all__ = [
     "StockPage",
     "WeatherPage",
     "YoutubePage",
+    "InstagramPage",
+    "DrawPage",
     "SettingsPage",
     "PlaceholderPage",
 ]

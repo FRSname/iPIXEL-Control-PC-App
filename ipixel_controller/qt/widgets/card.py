@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 
 class Card(QFrame):
-    """Rounded surface with optional header label."""
+    """Rounded surface with optional header label.
+
+    Cards hug their content vertically. Without ``Maximum`` on the
+    vertical size policy, putting a card inside a :class:`QStackedWidget`
+    (e.g. Clock's mode subviews) lets the card inherit the stack's
+    height, leaving a large empty gap at the bottom.
+    """
 
     def __init__(self, title: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("Card")
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(16, 14, 16, 16)
         self._layout.setSpacing(10)

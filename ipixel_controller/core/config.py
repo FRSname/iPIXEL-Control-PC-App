@@ -11,7 +11,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
 from .events import EventBus, Events
-from ..utils.paths import get_app_dir
+from ..utils.paths import get_app_dir, get_asset_dir
 
 
 # Default file names
@@ -22,7 +22,15 @@ SECRETS_FILE = "ipixel_secrets.json"
 
 @dataclass
 class ConfigPaths:
-    """Configuration file paths."""
+    """Configuration file paths.
+
+    Each file has a primary, user-writable location under :func:`get_app_dir`
+    (the exe folder in frozen builds, repo root in dev). In a PyInstaller
+    bundle there's also a read-only seed copy under :func:`get_asset_dir`
+    (the ``_internal`` directory). On first run we copy the seed across so
+    bundled defaults (sprite fonts, factory presets) are available without
+    forcing the user to ship two copies.
+    """
     settings: str = ""
     presets: str = ""
     secrets: str = ""
@@ -35,6 +43,31 @@ class ConfigPaths:
             self.presets = os.path.join(app_dir, PRESETS_FILE)
         if not self.secrets:
             self.secrets = os.path.join(app_dir, SECRETS_FILE)
+
+    def seed_from_bundle(self) -> None:
+        """Copy bundled defaults into the user-writable location.
+
+        No-op in dev (asset_dir == app_dir → same file). In a frozen
+        bundle, settings and presets get seeded; secrets never do (they
+        contain API keys that must stay user-supplied).
+        """
+        asset_dir = get_asset_dir()
+        app_dir = get_app_dir()
+        if os.path.normcase(asset_dir) == os.path.normcase(app_dir):
+            return
+        for primary, name in (
+            (self.settings, SETTINGS_FILE),
+            (self.presets, PRESETS_FILE),
+        ):
+            if os.path.isfile(primary):
+                continue
+            bundled = os.path.join(asset_dir, name)
+            if os.path.isfile(bundled):
+                try:
+                    import shutil
+                    shutil.copyfile(bundled, primary)
+                except Exception as e:
+                    print(f"Failed to seed {name} from bundle: {e}")
 
 
 class ConfigManager:
@@ -69,6 +102,10 @@ class ConfigManager:
         'stock_sprite_font_name': 'Text Default',
         'youtube_use_sprite_font': True,
         'youtube_sprite_font_name': 'Text Default',
+        'instagram_use_sprite_font': True,
+        'instagram_sprite_font_name': 'Text Default',
+        'instagram_layout': 'icon',
+        'instagram_animate_changes': True,
 
         # Display delays
         'text_static_delay_seconds': 2,
@@ -92,6 +129,10 @@ class ConfigManager:
     DEFAULT_SECRETS = {
         'youtube_api_key': '',
         'weather_api_key': '',
+        'ig_user_id': '',
+        'ig_access_token': '',
+        'ig_app_id': '',
+        'ig_app_secret': '',
     }
 
     def __init__(
@@ -108,6 +149,9 @@ class ConfigManager:
         """
         self._events = events
         self._paths = paths or ConfigPaths()
+        # Copy bundled defaults to the user-writable location on first run
+        # of a frozen build. No-op in dev.
+        self._paths.seed_from_bundle()
 
         self._settings: Dict[str, Any] = {}
         self._presets: List[Dict[str, Any]] = []

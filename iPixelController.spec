@@ -60,6 +60,14 @@ hiddenimports += [
     "ipixel_controller.services",
 ]
 
+# Optional embedded browser for the Draw tab. Pulled in best-effort so
+# builds work even if the user skipped PySide6-Addons.
+for pkg in ("PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineCore"):
+    try:
+        hiddenimports += collect_submodules(pkg)
+    except Exception:
+        pass
+
 # --------------------------------------------------------------- analysis
 a = Analysis(
     ["run_qt.py"],

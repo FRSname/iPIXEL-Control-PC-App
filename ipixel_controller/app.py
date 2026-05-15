@@ -12,12 +12,12 @@ from typing import Dict, Any, Optional
 
 from .core import (
     AppState,
-    TimerManager,
     EventBus,
     Events,
     ConfigManager,
-    DeviceManager,
 )
+from .core.timers import TimerManager
+from .core.device import DeviceManager
 from .services import SpriteFontService
 from .features import ALL_FEATURES, FeatureBase
 from .ui import ConnectionPanel, ControlBoard, SettingsPanel

@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from PySide6.QtCore import QDateTime, Qt, QTimer
+from PySide6.QtCore import QDate, QDateTime, Qt, QTime, QTimer
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -101,11 +101,6 @@ class ClockPage(Page):
         self._stack.addWidget(self._build_countdown())
         self.content_layout().addWidget(self._stack)
 
-        # Now safe to wire the signal and select the initial mode.
-        for rb in self._mode_radios:
-            rb.toggled.connect(self._on_mode_toggled)
-        self._mode_radios[0].setChecked(True)
-
         # --------------------------------------------------------- action row
         row = QHBoxLayout()
         self.show_btn = QPushButton("Show clock")
@@ -126,6 +121,12 @@ class ClockPage(Page):
         row.addWidget(save_btn)
         row.addStretch()
         self.content_layout().addLayout(row)
+
+        # Now that every widget _on_mode_toggled and _stop_live touch is
+        # built, wire the signal and select the initial mode.
+        for rb in self._mode_radios:
+            rb.toggled.connect(self._on_mode_toggled)
+        self._mode_radios[0].setChecked(True)
 
         self.on_connection_changed(self._device.is_connected)
 
@@ -408,11 +409,16 @@ class ClockPage(Page):
             self._start_live()
         else:
             target = QDateTime(
-                int(preset.get("countdown_year", 2026)),
-                int(preset.get("countdown_month", 1)),
-                int(preset.get("countdown_day", 1)),
-                int(preset.get("countdown_hour", 0)),
-                int(preset.get("countdown_minute", 0)),
+                QDate(
+                    int(preset.get("countdown_year", 2026)),
+                    int(preset.get("countdown_month", 1)),
+                    int(preset.get("countdown_day", 1)),
+                ),
+                QTime(
+                    int(preset.get("countdown_hour", 0)),
+                    int(preset.get("countdown_minute", 0)),
+                    0,
+                ),
             )
             self.target_edit.setDateTime(target)
             self.event_edit.setText(preset.get("countdown_event", ""))
@@ -432,3 +438,9 @@ class ClockPage(Page):
         self.live_btn.setEnabled(connected)
         if not connected:
             self._stop_live(silent=True)
+
+    def on_hidden(self) -> None:
+        # Without this, the live tick keeps firing in the background and
+        # the panel snaps back to the clock right after the user navigates
+        # to another page.
+        self._stop_live(silent=True)

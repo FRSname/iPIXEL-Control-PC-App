@@ -26,3 +26,8 @@ ENV/
 .idea/
 *.swp
 *.swo
+
+# PyInstaller build output
+build/
+dist/
+*.spec.bak

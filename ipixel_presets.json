@@ -119,5 +119,18 @@
     "stock_use_sprite_font": true,
     "stock_sprite_font_name": "Text Default",
     "stock_static_delay_seconds": 2
+  },
+  {
+    "name": "Instagram - @metro_tesin",
+    "type": "instagram",
+    "layout": "icon",
+    "format": "count_full",
+    "text_color": "#FFFFFF",
+    "bg_color": "#ffffff",
+    "auto_refresh": true,
+    "refresh_interval": 60,
+    "animate_changes": true,
+    "instagram_use_sprite_font": true,
+    "instagram_sprite_font_name": "Text Long"
   }
 ]

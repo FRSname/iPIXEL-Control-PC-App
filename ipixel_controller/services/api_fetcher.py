@@ -3,12 +3,21 @@ Base class for API data fetching services.
 
 Provides a common pattern for fetching data from external APIs in background
 threads with proper error handling and UI updates.
+
+The ``tkinter`` import is type-only — at runtime the class needs a ``root``
+that exposes ``.after()`` (a real ``tk.Tk`` instance from the legacy UI).
+Avoiding the eager import lets the Qt UI import sibling helper modules
+without pulling Tk into the PyInstaller bundle.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Callable, Optional
+from typing import TYPE_CHECKING, Dict, Any, Callable, Optional
 import threading
-import tkinter as tk
+
+if TYPE_CHECKING:  # pragma: no cover
+    import tkinter as tk
 
 
 class APIFetcher(ABC):

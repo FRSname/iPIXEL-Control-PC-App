@@ -5,10 +5,14 @@ Provides functionality to fetch stock prices and format them for display.
 Uses yfinance library for data retrieval.
 """
 
-from typing import Dict, Any, Optional
-import tkinter as tk
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Dict, Any, Optional
 
 from .api_fetcher import APIFetcher, CachingAPIFetcher
+
+if TYPE_CHECKING:  # pragma: no cover
+    import tkinter as tk
 
 
 class StockService(CachingAPIFetcher):

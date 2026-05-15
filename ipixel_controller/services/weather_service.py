@@ -4,10 +4,14 @@ Weather data fetching service.
 Provides functionality to fetch weather data using the OpenWeatherMap API.
 """
 
-from typing import Dict, Any, Optional
-import tkinter as tk
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Dict, Any, Optional
 
 from .api_fetcher import APIFetcher, CachingAPIFetcher
+
+if TYPE_CHECKING:  # pragma: no cover
+    import tkinter as tk
 
 
 class WeatherService(CachingAPIFetcher):

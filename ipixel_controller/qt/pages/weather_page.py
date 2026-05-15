@@ -26,8 +26,14 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+import os
+
+from PIL import Image
+
 from ...services.sprite_font import SpriteFontService
 from ...services.weather_service import format_weather_display
+from ...utils.image_utils import save_temp_image
+from ...utils.paths import resolve_asset_path
 from ..device_bridge import DeviceBridge
 from ..fetcher import BackgroundFetcher
 from ..sprite_sender import SpriteSender
@@ -41,6 +47,34 @@ FORMATS = [
     ("City + Temp", "city_temp"),
     ("Full", "full"),
 ]
+
+LAYOUT_ICONS = "icons"
+LAYOUT_TEXT = "text"
+LAYOUTS = [
+    ("Icons (weather icon + temp + °C + +/-)", LAYOUT_ICONS),
+    ("Text only", LAYOUT_TEXT),
+]
+
+
+def _weather_icon_filename(condition: str, icon_code: str) -> str:
+    """Map OWM condition + icon code to a file in Gallery/Sprites/."""
+    cond = (condition or "").lower()
+    if cond == "thunderstorm":
+        return "Thunderstorm.png"
+    if cond in ("drizzle", "rain"):
+        return "Rainy.png"
+    if cond == "snow":
+        return "Snow.png"
+    if cond in (
+        "mist", "smoke", "haze", "dust", "fog", "sand", "ash", "squall", "tornado",
+    ):
+        return "Atmospheric.png"
+    if cond == "clouds":
+        # 02d/02n = few clouds; rest = broken/overcast.
+        return "SunCloudy.png" if str(icon_code).startswith("02") else "Cloudy.png"
+    if cond == "clear":
+        return "Sunny.png"
+    return "Cloudy.png"
 
 
 def _fetch_weather(api_key: str, location: str, units: str) -> Dict[str, Any]:
@@ -144,10 +178,21 @@ class WeatherPage(Page):
         # ----- Display
         disp = Card(title="Display")
         dform = QFormLayout()
+
+        self.layout_combo = QComboBox()
+        for label, _ in LAYOUTS:
+            self.layout_combo.addItem(label)
+        last_layout = self._config.get_setting("weather_layout", LAYOUT_ICONS)
+        self.layout_combo.setCurrentIndex(
+            0 if last_layout == LAYOUT_ICONS else 1
+        )
+        self.layout_combo.currentIndexChanged.connect(self._on_layout_change)
+        dform.addRow("Layout", self.layout_combo)
+
         self.format_combo = QComboBox()
         for label, _ in FORMATS:
             self.format_combo.addItem(label)
-        dform.addRow("Format", self.format_combo)
+        dform.addRow("Text format", self.format_combo)
 
         col_row = QHBoxLayout()
         col_row.addWidget(QLabel("Text"))
@@ -161,6 +206,11 @@ class WeatherPage(Page):
         dform.addRow("Colours", col_row)
         disp.add_layout(dform)
         self.content_layout().addWidget(disp)
+
+        # Format combo only matters for the text layout — hide it when
+        # the icons layout is selected.
+        self._format_row_label = QLabel()  # tracking; real label is in form
+        self._refresh_format_row_visibility()
 
         # ----- Sprite font
         font_card = Card(title="Sprite font")
@@ -258,25 +308,150 @@ class WeatherPage(Page):
         if not self._current:
             QMessageBox.warning(self, "No data", "Fetch weather first.")
             return
-        text = format_weather_display(self._current, self._format_key())
+
         self._sender.stop()
-        if self.font_picker.use_sprite and self.font_picker.font_name:
-            err = self._sender.send_static(
-                text, self.font_picker.font_name, self.bg_color.color
-            )
+
+        layout = LAYOUTS[self.layout_combo.currentIndex()][1]
+        if layout == LAYOUT_ICONS:
+            err = self._send_icon_layout()
             if err:
-                QMessageBox.critical(self, "Sprite font error", err)
+                QMessageBox.critical(self, "Weather icons", err)
         else:
-            self._device.send_text(
-                text,
-                char_height=16,
-                color=self.text_color.color,
-                bg_color=self.bg_color.color,
-                animation=0,
-                speed=50,
-            )
+            text = format_weather_display(self._current, self._format_key())
+            if self.font_picker.use_sprite and self.font_picker.font_name:
+                err = self._sender.send_static(
+                    text, self.font_picker.font_name, self.bg_color.color
+                )
+                if err:
+                    QMessageBox.critical(self, "Sprite font error", err)
+            else:
+                self._device.send_text(
+                    text,
+                    char_height=16,
+                    color=self.text_color.color,
+                    bg_color=self.bg_color.color,
+                    animation=0,
+                    speed=50,
+                )
+
         if self.refresh_check.isChecked():
             self._refresh_timer.start(self.refresh_interval.value() * 1000)
+
+    # ------------------------------------------------------- icon composite
+    def _send_icon_layout(self) -> Optional[str]:
+        """Render the legacy 64×16 icon composite and dispatch it.
+
+        Layout (left → right): condition icon (16×16), centred temperature
+        number, °C glyph (4×16), Temp_plus / Temp_minus indicator on the
+        far right (11×16).
+        """
+        data = self._current or {}
+        condition = data.get("condition", "")
+        icon_code = data.get("icon", "")
+        temp = int(data.get("temperature", 0))
+
+        bg = self.bg_color.color
+        canvas = Image.new("RGB", (64, 16), bg)
+
+        # 1) Condition icon, left edge.
+        cond_path = resolve_asset_path(
+            os.path.join("Gallery", "Sprites", _weather_icon_filename(condition, icon_code))
+        )
+        if os.path.isfile(cond_path):
+            try:
+                with Image.open(cond_path) as icon:
+                    icon = icon.convert("RGBA")
+                    if icon.size != (16, 16):
+                        icon = icon.resize((16, 16), Image.LANCZOS)
+                    canvas.paste(icon, (0, 0), icon)
+            except Exception as e:  # noqa: BLE001
+                return f"Failed to load condition icon: {e}"
+
+        # 2) Temperature number — sprite font if enabled, plain fallback otherwise.
+        available_start, available_end = 16, 53
+        available_width = available_end - available_start
+
+        temp_str = str(abs(temp))
+        text_img: Optional[Image.Image] = None
+        minus_img: Optional[Image.Image] = None
+
+        if self.font_picker.use_sprite and self.font_picker.font_name:
+            text_img, terr = self._fonts.render_text_line(
+                temp_str, self.font_picker.font_name, bg
+            )
+            if terr:
+                # Fall through — we'll still place the rest of the layout.
+                text_img = None
+            if temp < 0:
+                minus_img, _err = self._fonts.render_text_line(
+                    "-", self.font_picker.font_name, bg
+                )
+
+        text_w = text_img.width if text_img else len(temp_str) * 7
+        minus_w = minus_img.width if minus_img else (7 if temp < 0 else 0)
+
+        # 3) °C glyph (4×16) right after the number.
+        celsius_img: Optional[Image.Image] = None
+        celsius_w = 4
+        celsius_path = resolve_asset_path(
+            os.path.join("Gallery", "Sprites", "Celsius.png")
+        )
+        if os.path.isfile(celsius_path):
+            try:
+                celsius_img = Image.open(celsius_path).convert("RGBA")
+                if celsius_img.size != (4, 16):
+                    celsius_img = celsius_img.resize((4, 16), Image.LANCZOS)
+                celsius_w = celsius_img.width
+            except Exception:  # noqa: BLE001
+                celsius_img = None
+
+        spacing = 1
+        content_w = text_w + spacing + celsius_w
+        centered_start = available_start + (available_width - content_w) // 2
+
+        if minus_img is not None and temp < 0:
+            mx = centered_start - minus_w - 1
+            my = (16 - minus_img.height) // 2
+            canvas.paste(minus_img, (mx, my), minus_img if minus_img.mode == "RGBA" else None)
+
+        if text_img is not None:
+            ty = (16 - text_img.height) // 2
+            canvas.paste(
+                text_img, (centered_start, ty),
+                text_img if text_img.mode == "RGBA" else None,
+            )
+
+        if celsius_img is not None:
+            canvas.paste(celsius_img, (centered_start + text_w + spacing, 0), celsius_img)
+            celsius_img.close()
+
+        # 4) Right-edge +/- temperature indicator (11×16 at x=53).
+        indicator = "Temp_plus.png" if temp >= 0 else "Temp_minus.png"
+        ind_path = resolve_asset_path(os.path.join("Gallery", "Sprites", indicator))
+        if os.path.isfile(ind_path):
+            try:
+                with Image.open(ind_path) as ind:
+                    ind = ind.convert("RGBA")
+                    if ind.size != (11, 16):
+                        ind = ind.resize((11, 16), Image.LANCZOS)
+                    canvas.paste(ind, (53, 0), ind)
+            except Exception:  # noqa: BLE001
+                pass
+
+        path = save_temp_image(canvas, "ipixel_weather.png")
+        self._device.send_image(path, resize_method="crop", save_slot=0)
+        return None
+
+    # --------------------------------------------------------------- options
+    def _on_layout_change(self, _idx: int) -> None:
+        layout = LAYOUTS[self.layout_combo.currentIndex()][1]
+        self._config.set_setting("weather_layout", layout)
+        self._refresh_format_row_visibility()
+
+    def _refresh_format_row_visibility(self) -> None:
+        # The format combo is only meaningful for the text layout.
+        is_text = self.layout_combo.currentIndex() == 1
+        self.format_combo.setEnabled(is_text)
 
     def _on_font_change(self) -> None:
         self._config.set_setting("weather_use_sprite_font", self.font_picker.use_sprite)
@@ -311,10 +486,13 @@ class WeatherPage(Page):
             "city": self.city_edit.text().strip(),
             "units": self._units(),
             "format": self._format_key(),
+            "layout": LAYOUTS[self.layout_combo.currentIndex()][1],
             "text_color": self.text_color.color,
             "bg_color": self.bg_color.color,
             "auto_refresh": self.refresh_check.isChecked(),
             "refresh_interval": self.refresh_interval.value(),
+            "weather_use_sprite_font": self.font_picker.use_sprite,
+            "weather_sprite_font_name": self.font_picker.font_name,
         }
         self._config.add_preset(preset)
         QMessageBox.information(self, "Saved", f"Preset '{name}' saved.")
@@ -327,10 +505,17 @@ class WeatherPage(Page):
             if key == fmt:
                 self.format_combo.setCurrentIndex(i)
                 break
+        layout = preset.get("layout", LAYOUT_ICONS)
+        for i, (_, key) in enumerate(LAYOUTS):
+            if key == layout:
+                self.layout_combo.setCurrentIndex(i)
+                break
         self.text_color.set_color(preset.get("text_color", "#FFFFFF"))
         self.bg_color.set_color(preset.get("bg_color", "#000000"))
         self.refresh_check.setChecked(bool(preset.get("auto_refresh", False)))
         self.refresh_interval.setValue(int(preset.get("refresh_interval", 600)))
+        self.font_picker.set_use_sprite(bool(preset.get("weather_use_sprite_font", False)))
+        self.font_picker.set_font_name(preset.get("weather_sprite_font_name", ""))
 
         def once(_data):
             self._send()
