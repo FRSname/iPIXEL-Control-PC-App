@@ -1,398 +1,306 @@
 # iPixel LED Panel Controller
 
-A desktop application to control iPixel Color LED matrix displays (like BGLight, B.K. Light LED Pixel Board) directly from your Windows PC via Bluetooth.
+A desktop application + companion ESP32 firmware that drive iPixel Color BLE
+LED matrix panels (BGLight, B.K. Light, and generic `LED_BLE_*` devices) from
+a Windows PC or standalone over Wi-Fi.
 
 ![iPixel Controller](screenshot.png)
 
-## 🚀 Quick Start
+## What's in this repo
 
-**New users?** Read [INSTALL.md](INSTALL.md) or [START_HERE.txt](START_HERE.txt) for step-by-step instructions!
+| Component | Path | Purpose |
+| --- | --- | --- |
+| **Qt desktop app (current)** | `ipixel_controller/qt/` + `run_qt.py` | The actively developed PySide6 UI. All new features land here. |
+| Modular Tkinter (mid-refactor) | `ipixel_controller/` (non-`qt/`) | Transitional package; **frozen** — will be removed once Qt parity is final. |
+| Monolith Tkinter (legacy) | `ipixel_controller.py` + `run.py` / `run.bat` | The original 6000-line app. Still launches; no new work here. |
+| **ESP32 firmware** | `esp32-firmware/` | Standalone Instagram follower counter that drives a panel over BLE without needing a PC. |
 
-### Installation (3 steps)
+If you are a returning user: launch the Qt app with `python run_qt.py`. The old
+`run.bat` / `run.py` still work but point at the legacy monolith.
 
-1. **Install Python 3.8+** from [python.org](https://www.python.org/downloads/)
-   - ⚠️ Check "Add Python to PATH" during installation!
+## Major refactor in 2026 — what changed
 
-2. **Install dependencies:**
+The codebase went through a big restructuring this year:
+
+- **PySide6/Qt UI is now the primary frontend.** Everything visible to users —
+  pages, sidebar, theming, color pickers, connection bar — lives under
+  `ipixel_controller/qt/`. The legacy Tkinter monolith is kept on disk for
+  fallback but receives no new features.
+- **Framework-agnostic core extracted.** `core/config.py`, `core/events.py`,
+  `services/sprite_font.py`, `services/animation_generator.py`, plus the pure
+  helpers inside the Stock / Weather / YouTube / Instagram service modules are
+  shared by both the Qt app and (where still used) the legacy Tk path.
+- **BLE wrapper rewritten.** The Tkinter-coupled `core/device.py` was replaced
+  by `qt/device_bridge.py` — a `DeviceBridge` that owns its own asyncio loop on
+  a background thread and surfaces results as Qt signals. `qt/sprite_sender.py`,
+  `qt/fetcher.py`, and `qt/playlist.py` build on top of it.
+- **Sprite-font text now goes through `send_image`,** not `send_text`. This
+  fixes the dim-background issue on panels whose firmware dims `send_text`
+  backgrounds (white-on-anything actually looks white now).
+- **New Instagram feature** — both as a Qt page (`qt/pages/instagram_page.py`)
+  and as a standalone ESP32 firmware in `esp32-firmware/` (see below).
+- **Embedded Pixilart editor** on the Draw page via `QtWebEngineWidgets` when
+  `PySide6-Addons` is installed; falls back to the system browser otherwise.
+- **Playlists** — cycle saved presets on a timer from the Home page
+  (`qt/playlist.py`). Playlists are JSON files under `playlists/`.
+
+Internal architecture, porting recipes, and known invariants are documented in
+[CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md).
+
+## Quick start (desktop app)
+
+1. Install **Python 3.8+** from [python.org](https://www.python.org/downloads/)
+   — tick **"Add Python to PATH"** during install.
+2. Install dependencies:
    ```bash
    python -m pip install -r requirements.txt
    ```
-
-3. **Launch the app:**
+   `PySide6-Addons` is optional; only needed if you want the embedded Pixilart
+   editor on the Draw page (without it, Draw opens the system browser).
+3. Launch the Qt UI:
    ```bash
-   python run.py
+   python run_qt.py
    ```
-   Or simply double-click `run.py`
+   Or, on Windows, after building with `python build_exe.py`, run the bundled
+   `iPixelController.exe` from `dist/`.
 
-**Note:** Use `run.py` instead of `run.bat` - Python files aren't blocked by Windows Smart App Control!
+### Building a standalone Windows .exe
 
-### API Keys (stored separately)
+```bash
+python build_exe.py                 # PyInstaller one-folder build + Start Menu shortcut prompt
+python build_exe.py --clean         # wipe build/ + dist/ first
+python build_exe.py --no-shortcut   # build only, skip shortcut prompt
+```
 
-API keys are stored in `ipixel_secrets.json` (gitignored). Add keys via the app UI (YouTube/Weather tabs) and they will be saved there.
+The spec ([iPixelController.spec](iPixelController.spec)) targets `run_qt.py`,
+excludes the Tk runtime to save a few MB, and best-effort pulls in
+`QtWebEngineWidgets` / `QtWebEngineCore` for the Draw page.
 
-## Features
+## Features (desktop app)
 
-### Core Features
-- 🔍 **Auto-scan** for iPixel devices via Bluetooth
-- 📝 **Send text** with customizable text color, background color, and sprite fonts
-- 🖼️ **Display images** (PNG, JPG, GIF, BMP) with thumbnail previews
-- 🕐 **Clock mode** with built-in styles, custom time formats, and countdown timers
-- 💾 **Preset system** - Save and quickly execute your favorite configurations
-- 💡 **Brightness control** (1-100%)
-- ⚡ **Power control** (ON/OFF)
-- 🎨 **Color picker** for text and background
-- 🖥️ **Easy-to-use GUI** built with Tkinter
+### Core
+- Auto-scan for iPixel devices via Bluetooth LE
+- Send text with customisable text colour, background colour, and sprite fonts
+- Display images (PNG, JPG, GIF, BMP)
+- Clock modes: built-in styles, custom time formats, countdown timers
+- Preset system — save, recall, and cycle via playlists
+- Brightness (1–100%) and power control
 
-### Advanced Features
+### Stock Market Display
+Live prices via the free `yfinance` library (no API key). Smart formatting
+(K/M notation), auto-colour based on direction.
 
-#### 📈 Stock Market Display
-Display live stock prices directly on your LED panel! 
-- **No API key required** - Uses free yfinance library
-- Support for any stock ticker (AAPL, TSLA, BTC-USD, etc.)
-- Auto-refresh with configurable intervals
-- Smart price formatting (auto-adjusts decimals, uses K notation for large numbers)
-- Auto-color based on price movement (green=up, red=down)
-- Multiple display formats (with static cycling for some formats)
+### YouTube Stats
+Subscribers display with an optional inline 14×16 logo. Requires a free
+YouTube Data API v3 key.
 
-#### 📺 YouTube Stats
-Show your YouTube channel subscribers with an optional inline logo.
-- Works with channel IDs or @handles
-- Auto-refresh capability
-- Smart number formatting (1.2M, 450K, etc.)
-- **Format:** Logo + Subscribers only
-- **Logo requirement:** 14x16 PNG (auto-resized if needed)
-- **Requires:** YouTube Data API v3 key (stored in `ipixel_secrets.json`)
+### Weather
+Current conditions + temperature from OpenWeatherMap. Composite icons:
+`Sunny.png`, `Cloudy.png`, `Rainy.png`, `Snow.png`, `SunCloudy.png`,
+`Atmospheric.png`, `Thunderstorm.png`, plus `Celsius.png` / `Temp_plus.png` /
+`Temp_minus.png` — all bundled in `Gallery/Sprites/`. Requires a free
+OpenWeatherMap API key.
 
-#### 🌤️ Weather Display
-Show current weather conditions and temperature!
-- Real-time weather data from OpenWeatherMap
-- Support for any city worldwide
-- Temperature in Celsius or Fahrenheit
-- Display current temperature, condition, feels-like, humidity
-- Auto-refresh with configurable intervals
-- Multiple display formats:
-  - Temperature + Condition (e.g., "72°F Sunny")
-  - Temperature only
-  - City + Temperature
-  - Full info
-- **Requires:** Free OpenWeatherMap API key (stored in `ipixel_secrets.json`)
-- **Quota:** 1,000 calls/day, updates every 10 minutes (free tier)
+### Instagram (NEW)
+Show your Instagram Business follower count. Requires `ig_user_id` (the
+17-digit IG Business Account ID) and `ig_access_token` (a long-lived User
+Token or a non-expiring System User token). Optional `ig_app_id` /
+`ig_app_secret` enable the page's "Refresh token" button (long-lived tokens
+expire after 60 days). Icon-mode renders the count *on top of* the IG icon
+canvas and requires a sprite font selected.
 
-#### 🎨 Pixel Art Animations
-Generate and display procedural pixel art animations!
-- **Conway's Game of Life**: Classic cellular automaton with emergent patterns
-  - Adjustable initial density (10-50%)
-  - Watch patterns evolve in real-time
-- **Matrix Rain**: Digital rain effect inspired by The Matrix
-  - Falling character trails with fade effect
-- **Fire Effect**: Realistic fire simulation
-  - Heat propagation algorithm
-  - Red-orange-yellow gradient
-- **Starfield**: Parallax scrolling stars
-  - 3 speed levels for depth perception
-- **Plasma**: Colorful interference patterns
-  - Sine wave-based smooth animations
-- Configurable FPS (1-30, recommended 10-20 for best results)
-- Color schemes: White, Green, Blue, Red, Rainbow
-- Duration control (set seconds or infinite loop)
-- **No API key required**
+### Draw
+Pixel-art editor embedded via `QtWebEngineWidgets` (when `PySide6-Addons` is
+installed) or opened in the system browser. Output exports to PNG and feeds
+into the Image / preset pipeline.
 
-## Requirements
+### Pixel-art Animations
+Conway's Game of Life, Matrix Rain, Fire, Starfield, Plasma. Configurable
+FPS, colour scheme, and duration.
+
+### Playlists
+Cycle a sequence of saved presets on a timer. Playlists live as JSON under
+`playlists/` in the legacy shape `{"name", "items":[{"preset_name", "duration"}]}`.
+
+## ESP32 firmware (`esp32-firmware/`)
+
+A self-contained ESP32 firmware that polls Instagram followers over Wi-Fi and
+pushes the result directly to an iPixel BLE panel — **no PC needed once
+provisioned**. Useful if you want a permanent always-on counter.
+
+### Capabilities
+- WiFiManager captive portal for first-time Wi-Fi setup (AP name: `iPixel-Setup`).
+- Mobile-friendly web UI served from LittleFS for configuration after the
+  ESP32 joins your network.
+- Instagram Graph API poller (configurable refresh interval, ≥ 60 s).
+- 5×7 sprite-font renderer on a 64×16 framebuffer with slide-up tween
+  animation when the count changes.
+- NimBLE client that auto-connects to the panel by MAC (with scan-and-pick
+  flow in the web UI).
+- All settings persist in ESP32 NVS (Preferences) — survive power cycles.
+- **Rotate display 180°** option for panels mounted upside-down. Mirrors the
+  framebuffer in software just before BLE encoding; works with every render
+  path (Instagram updates, tween frames, repush-on-reconnect).
+
+### Hardware
+- **MCU**: any ESP32 with at least 4 MB flash (developed against
+  ESP32-WROOM-32U with external IPEX antenna).
+- **Panel**: any pypixelcolor-compatible iPixel / BGLight / B.K. Light 64×16
+  BLE panel.
+
+### Installing the firmware
+
+You need **VS Code** + the **PlatformIO IDE** extension. There is no
+pre-built `.bin` distributed — the firmware is built from source so the
+filesystem image (web UI) can be embedded.
+
+1. Install [VS Code](https://code.visualstudio.com/) and search the
+   Extensions marketplace for **PlatformIO IDE**. Install it. First launch
+   takes a few minutes while PlatformIO downloads the toolchain.
+2. Open the `esp32-firmware/` folder in VS Code (**File → Open Folder…**).
+   PlatformIO will detect `platformio.ini` and finish setting up the project.
+3. Plug the ESP32 board into USB. Windows should pick up the USB-to-serial
+   driver automatically; if not, install the CP2102 / CH340 driver for your
+   board.
+4. In the PlatformIO sidebar (the alien icon on the left), open **Project
+   Tasks → esp32dev → General**, then:
+   - Click **Build** — compiles the firmware.
+   - Click **Upload Filesystem Image** — flashes `data/index.html` (the web
+     UI) to LittleFS. **Do this before, or any time you change the HTML.**
+   - Click **Upload** — flashes the firmware itself.
+5. Open **Monitor** (same Project Tasks panel) at 115200 baud to watch boot
+   messages.
+
+> **CLI alternative:** if you prefer the terminal, install PlatformIO Core
+> (`pip install platformio`) and run from `esp32-firmware/`:
+> ```bash
+> pio run                  # build
+> pio run -t uploadfs      # flash LittleFS (web UI)
+> pio run -t upload        # flash firmware
+> pio device monitor       # serial monitor
+> ```
+
+### First-time provisioning (after flashing)
+
+On first boot the ESP32 has no Wi-Fi credentials, so it starts an open AP:
+
+1. On your phone, connect to the Wi-Fi network **`iPixel-Setup`** (no password).
+2. A captive portal opens automatically — pick your home Wi-Fi, enter the
+   password, save. The ESP32 reboots and joins.
+3. Watch the serial monitor for the IP address, e.g. `[wifi] connected,
+   IP=192.168.1.42`.
+4. On your phone (or any device on the same network), open
+   `http://<that-ip>/` in a browser.
+5. Configure:
+   - **Instagram Business Account ID** (17-digit numeric, starts with `17841…`)
+   - **Access Token** — long-lived User Token or non-expiring System User
+     token (see the desktop app's Instagram tab or
+     [Graph API Explorer](https://developers.facebook.com/tools/explorer))
+   - **Refresh interval** (seconds, minimum 60)
+   - **Display format**, **text colour**, **background colour**
+   - **Panel MAC** — click **Scan for panels**, then tap the device that
+     matches your panel
+   - **Rotate display 180°** — check if your panel is mounted upside-down
+6. Tap **Save**. The ESP32 fetches the follower count immediately and pushes
+   it to the panel; all settings persist across reboots in NVS.
+
+### Wi-Fi reset
+
+If you move the ESP32 to a different network, open the web UI and tap
+**Forget Wi-Fi & reboot**. The ESP32 will come back up as the `iPixel-Setup`
+AP for re-provisioning.
+
+### Firmware layout
+
+```
+esp32-firmware/
+├── platformio.ini             # board + libraries
+├── data/index.html            # web UI (flashed to LittleFS via uploadfs)
+├── src/
+│   ├── main.cpp               # orchestration, poll loop, animation driver
+│   ├── config.{h,cpp}         # NVS-backed settings (incl. rotate180)
+│   ├── web_ui.{h,cpp}         # HTTP + JSON API + scan endpoints
+│   ├── instagram.{h,cpp}      # HTTPS Graph API fetch
+│   ├── renderer.{h,cpp}       # 5×7 font → 64×16 RGB buffer + tween
+│   ├── ipixel_ble.{h,cpp}     # NimBLE client + frame encoder
+│   └── png_encode.{h,cpp}     # 64×16 RGB → PNG (for send_image framing)
+```
+
+See [esp32-firmware/README.md](esp32-firmware/README.md) for milestone
+history and protocol details.
+
+## Requirements (desktop app)
 
 - Windows 10/11 (with Bluetooth LE support)
 - Python 3.8 or higher
-- Bluetooth adapter (built-in or USB dongle)
-- iPixel Color LED panel (BGLight, B.K. Light, etc.)
+- Bluetooth LE adapter (built-in or USB dongle)
+- An iPixel Color compatible LED panel
 
-## Hardware Limitations
+## Configuration files
 
-- **Background color brightness:** On some iPixel panels/firmware versions, the background color rendered by the built-in text command appears dim or near-black, even when set to bright colors (e.g., white). This is a **device/firmware limitation**, not a color picker bug in the app.
-- **Workaround:** If you need a truly bright background, use a full-image preset (or a custom image) where the background is part of the image itself. The original vendor app may use different commands or firmware paths that aren’t exposed here.
+All in the working directory (or the app folder when frozen with PyInstaller):
 
-## Installation
+| File | Purpose |
+| --- | --- |
+| `ipixel_settings.json` | UI prefs, last-used device, sprite-font library |
+| `ipixel_presets.json` | Saved presets |
+| `ipixel_secrets.json` | API keys — `youtube_api_key`, `weather_api_key`, `ig_user_id`, `ig_access_token`, optional `ig_app_id` / `ig_app_secret`. **Gitignored.** |
+| `playlists/*.json` | Playlist definitions |
+| `Gallery/Sprites/*.png` | Sprite fonts + weather/Instagram icons |
 
-### Method 1: Using Python (Recommended)
-
-1. **Install Python** (if not already installed):
-   - Download from [python.org](https://www.python.org/downloads/)
-   - During installation, check "Add Python to PATH"
-
-2. **Download this application**:
-   - Download all files to a folder (e.g., `C:\iPixel`)
-
-3. **Install dependencies**:
-   ```bash
-   cd C:\iPixel
-   pip install -r requirements.txt
-   ```
-
-4. **Run the application**:
-   ```bash
-   python ipixel_controller.py
-   ```
-
-### Method 2: Create a Standalone Executable (Optional)
-
-To create a standalone .exe file that doesn't require Python:
-
-1. Install PyInstaller:
-   ```bash
-   pip install pyinstaller
-   ```
-
-2. Create the executable:
-   ```bash
-   pyinstaller --onefile --windowed --name "iPixel Controller" ipixel_controller.py
-   ```
-
-3. Find the executable in the `dist` folder
-
-## Usage
-
-### 1. Connect to Your Device
-
-1. Turn on your iPixel LED panel
-2. Click **"Scan"** to search for nearby Bluetooth devices
-3. Select your device from the dropdown (usually named "LED_BLE_...")
-4. Click **"Connect"**
-5. Wait for "Connected" status (green)
-
-### 2. Send Text
-
-1. Go to the **"Text"** tab
-2. Enter your text in the text box
-3. Choose text color (default: white)
-4. Choose background color (default: black)
-5. Select a sprite font (optional)
-6. Click **"Send Text"**
-
-**Tips:**
-- Keep text short for better readability on small displays
-- Smaller font sizes work better for longer text
-- High contrast (white on black) is most readable
-
-### 3. Display Images
-
-1. Go to the **"Image"** tab
-2. Click **"Load Image"** and select an image file
-3. Preview appears in the window
-4. Click **"Send Image"**
-
-**Supported formats:** PNG, JPG, JPEG, GIF, BMP
-
-**Tips:**
-- Images are automatically resized to fit your panel
-- For best results, use images with your panel's exact resolution
-- Common panel sizes: 64x64, 32x32, 96x16
-
-### 4. Show Clock
-
-1. Go to the **"Clock"** tab
-2. Select a clock style (0-8)
-3. Click **"Show Clock"**
-
-The clock will display the current time and update automatically.
-
-### 5. Stock Market Display
-
-1. Go to the **"📈 Stock"** tab
-2. Enter a stock ticker symbol (e.g., AAPL, TSLA, GOOGL)
-3. Click **"Fetch Stock Data"**
-4. Choose your display format and colors
-5. Click **"Send to Display"**
-6. Enable auto-refresh to update prices automatically
-
-**Note:** No API key required - uses yfinance library.
-
-### 6. YouTube Stats
-
-1. Go to the **"📺 YouTube"** tab
-2. Enter your **YouTube API key** (get one from [Google Cloud Console](https://console.cloud.google.com/))
-3. Enter a channel ID or @handle (e.g., @MrBeast)
-4. Click **"Fetch Stats"**
-5. Click **"Send to Display"**
-
-**Format:** Logo + Subscribers only
-
-### 7. Weather Display
-
-1. Go to the **"🌤️ Weather"** tab
-2. Enter your **OpenWeatherMap API key** (get free key from [openweathermap.org](https://openweathermap.org/api))
-## Developer Notes
-
-- Default assets live under `Gallery/` and are referenced with relative paths.
-- Sprite fonts are managed in Settings → Sprite Fonts and stored in `ipixel_settings.json`.
-- API keys are saved in `ipixel_secrets.json` (gitignored).
-
-See [AGENTS.md](AGENTS.md) for internal architecture and contributor notes.
-3. Enter your city name
-4. Select temperature unit (°C or °F)
-5. Click **"Fetch Weather"**
-6. Choose display format
-7. Click **"Send to Display"**
-
-**Display formats:**
-- Temperature + Condition
-- Temperature Only
-- City + Temperature
-- Full (all info)
-
-### 8. Pixel Art Animations
-
-1. Go to the **"🎨 Animations"** tab
-2. Choose an animation type:
-   - **Conway's Game of Life**: Classic cellular automaton
-   - **Matrix Rain**: Digital rain effect
-   - **Fire Effect**: Realistic fire simulation
-   - **Starfield**: Moving stars
-   - **Plasma**: Colorful plasma effect
-3. Select color scheme and speed (FPS)
-4. Set duration (0 = infinite loop)
-5. Click **"Start Animation"**
-
-**Tips:**
-- Higher FPS = smoother but more CPU intensive
-- Game of Life density affects initial pattern complexity
-- Use rainbow color for psychedelic effects
-
-### 9. Adjust Settings
-
-Go to the **"Settings"** tab to:
-- **Adjust brightness**: Drag the slider (1-100%) and click "Set Brightness"
-- **Power control**: Turn the display ON or OFF
+API keys are entered through the Qt UI (Instagram / YouTube / Weather pages)
+and saved into `ipixel_secrets.json` for you.
 
 ## Troubleshooting
 
-### Device Not Found During Scan
+### Desktop app
 
-- Ensure your LED panel is powered on
-- Check that Bluetooth is enabled on your PC
-- Make sure the panel is not connected to another device
-- Try moving the panel closer to your PC
-- Restart both the panel and your PC
+- **Device not found during scan** — power-cycle the panel, confirm Bluetooth
+  is on, ensure no other app (vendor app, ESP32 firmware) is currently
+  connected, move closer to the PC.
+- **Connection failed** — close the official vendor app, remove the device
+  in Windows Settings → Bluetooth & devices, then re-scan.
+- **`ModuleNotFoundError`** — re-run `python -m pip install -r requirements.txt`.
+- **Background colour looks dim** — this is a firmware quirk of some panels
+  with `send_text`. Sprite-font text in the Qt app routes through
+  `send_image` and renders backgrounds correctly. For fully custom looks, use
+  an image preset.
 
-### Connection Failed
+### ESP32 firmware
 
-- Ensure no other app is connected to the panel (close the official iPixel app)
-- On Windows, go to Settings → Bluetooth & devices → Remove the device, then scan again
-- Try disabling and re-enabling Bluetooth
-- Make sure your Bluetooth adapter supports Bluetooth LE (Low Energy)
+- **`iPixel-Setup` AP doesn't appear** — wait ~10 s after power-on for the
+  WiFiManager portal to come up; if it still doesn't appear, check the serial
+  monitor for boot errors.
+- **Web UI loads but says "IG: …"** — confirm the access token is valid in
+  Graph API Explorer; tokens expire after 60 days unless they're System User
+  tokens.
+- **Panel stays blank but BLE shows "connected"** — make sure the selected
+  panel MAC actually matches the one near you; the scan list sorts by RSSI.
+- **Display is upside-down** — tick the "Rotate display 180°" option in the
+  web UI and save.
 
-### Text/Image Not Displaying
+## Technical details
 
-- Check that you're connected (status shows "Connected" in green)
-- Try reducing font size or text length
-- Ensure image file is not corrupted
-- Try power cycling the panel
+### Supported devices
+LED panels using the iPixel Color protocol over BLE: BGLight LED Pixel
+Boards, B.K. Light LED Pixel Board (Action stores), generic `LED_BLE_*` devices.
 
-### "ModuleNotFoundError" Error
-
-- Ensure you've installed all dependencies:
-  ```bash
-  pip install -r requirements.txt
-  ```
-
-### Slow Performance
-
-- Close other Bluetooth applications
-- Reduce image size before sending
-- Move panel closer to PC for better signal
-
-## API Keys Setup
-
-### YouTube API Key
-
-To use the YouTube Stats feature, you need a free YouTube Data API v3 key:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or select existing)
-3. Enable **YouTube Data API v3**:
-   - Go to "APIs & Services" → "Library"
-   - Search for "YouTube Data API v3"
-   - Click "Enable"
-4. Create credentials:
-   - Go to "APIs & Services" → "Credentials"
-   - Click "Create Credentials" → "API Key"
-   - Copy the generated key
-5. Paste the key in the app's YouTube tab and click "Save Key"
-
-**Note:** Free tier includes 10,000 quota units/day (sufficient for personal use).
-
-### OpenWeatherMap API Key
-
-To use the Weather Display feature, you need a free OpenWeatherMap API key:
-
-1. Go to [openweathermap.org](https://openweathermap.org/api)
-2. Click "Sign Up" and create a free account
-3. Go to your account → "API keys"
-4. Copy the default API key (or create a new one)
-5. Paste the key in the app's Weather tab and click "Save Key"
-
-**Note:** Free tier includes 1,000 API calls/day and updates every 10 minutes.
-
-## Technical Details
-
-### Supported Devices
-
-This application works with LED panels using the iPixel Color protocol via Bluetooth LE:
-- BGLight LED Pixel Boards
-- B.K. Light LED Pixel Board (from Action stores)
-- Generic LED_BLE_* devices
-- iPixel Color compatible displays
-
-### Protocol Information
-
-- **Communication**: Bluetooth Low Energy (BLE)
+### Protocol
+- **Transport**: Bluetooth Low Energy
 - **Write UUID**: `0000fa02-0000-1000-8000-00805f9b34fb`
 - **Notify UUID**: `0000fa03-0000-1000-8000-00805f9b34fb`
-- **Library**: Built on [pypixelcolor](https://github.com/lucagoc/pypixelcolor)
-
-## Development
-
-### Project Structure
-
-```
-ipixel-controller/
-├── ipixel_controller.py   # Main application
-├── requirements.txt        # Python dependencies
-└── README.md              # This file
-```
-
-### Dependencies
-
-- `pypixelcolor` - Core library for iPixel protocol
-- `bleak` - Bluetooth Low Energy library
-- `pillow` - Image processing
-
-### Contributing
-
-Feel free to submit issues or pull requests!
-
-## Known Limitations
-
-- Windows only (Linux/Mac support possible with modifications)
-- Single device connection at a time
-- Some advanced features from the official app may not be available
-- Bluetooth range is limited (typically 10 meters)
+- **Library**: built on [pypixelcolor](https://github.com/lucagoc/pypixelcolor)
 
 ## Credits
 
-- Built on [pypixelcolor](https://github.com/lucagoc/pypixelcolor) by lucagoc
-- Based on reverse-engineered iPixel protocol
-- Thanks to the Home Assistant [ha-ipixel-color](https://github.com/cagcoach/ha-ipixel-color) project for protocol documentation
+- Built on [pypixelcolor](https://github.com/lucagoc/pypixelcolor) by lucagoc.
+- BLE transport via [bleak](https://github.com/hbldh/bleak) (desktop) and
+  [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) (ESP32).
+- Protocol docs cross-referenced against the
+  [ha-ipixel-color](https://github.com/cagcoach/ha-ipixel-color) Home
+  Assistant integration.
 
 ## License
 
-This project is provided as-is for personal use. Not affiliated with iPixel or the original device manufacturers.
-
-## Support
-
-For issues or questions:
-1. Check the Troubleshooting section above
-2. Verify you're using the latest version
-3. Check the pypixelcolor documentation
-4. Open an issue on GitHub (if applicable)
-
----
-
-**Enjoy controlling your LED panel!** 🎉
+Provided as-is for personal use. Not affiliated with iPixel or the original
+device manufacturers.
