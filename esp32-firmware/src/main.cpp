@@ -133,6 +133,7 @@ void setup() {
     // BLE setup is best-effort; the firmware keeps running even if the panel
     // is off. Reconnect cadence lives in ipixelBleTick() called from loop().
     ipixelBleSetup(cfg.panelMac);
+    ipixelBleSetRotate180(cfg.rotate180);
 
     lastFetchMs = millis() - cfg.refreshSec * 1000UL; // force first fetch immediately
 }

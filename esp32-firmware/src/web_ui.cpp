@@ -66,6 +66,7 @@ void webUiBegin(AppConfig& cfgRef) {
         d["text_color"]   = hexColor(gCfg->textColor);
         d["bg_color"]     = hexColor(gCfg->bgColor);
         d["panel_mac"]    = gCfg->panelMac;
+        d["rotate_180"]   = gCfg->rotate180;
         String out;
         serializeJson(d, out);
         req->send(200, "application/json", out);
@@ -147,14 +148,20 @@ void webUiBegin(AppConfig& cfgRef) {
         }
         String oldMac = gCfg->panelMac;
         get("panel_mac", gCfg->panelMac);
+        if (req->hasParam("rotate_180", true)) {
+            String v = req->getParam("rotate_180", true)->value();
+            gCfg->rotate180 = (v == "1" || v.equalsIgnoreCase("true") || v.equalsIgnoreCase("on"));
+        }
 
         configSave(*gCfg);
-        Serial.printf("[cfg] saved: ig_id=%s has_tok=%d refresh=%u fmt=%u mac=%s\n",
+        ipixelBleSetRotate180(gCfg->rotate180);
+        Serial.printf("[cfg] saved: ig_id=%s has_tok=%d refresh=%u fmt=%u mac=%s rot180=%d\n",
                       gCfg->igUserId.c_str(),
                       (int)(gCfg->accessToken.length() > 0),
                       (unsigned)gCfg->refreshSec,
                       (unsigned)gCfg->formatMode,
-                      gCfg->panelMac.c_str());
+                      gCfg->panelMac.c_str(),
+                      (int)gCfg->rotate180);
         if (!oldMac.equalsIgnoreCase(gCfg->panelMac)) {
             ipixelBleSetPinnedMac(gCfg->panelMac);
         }

@@ -30,6 +30,8 @@
   .devices li .mac { font-family: ui-monospace, monospace; font-size:.8rem; opacity:.7; }
   .devices li .rssi { float:right; opacity:.6; font-size:.8rem; }
   .empty { font-size:.85rem; opacity:.6; padding:.4rem 0; }
+  .toggle { display:flex; align-items:center; gap:.6rem; margin-top:.75rem; font-size:.9rem; }
+  .toggle input { width:auto; }
 </style>
 </head>
 <body>
@@ -85,6 +87,11 @@
   <button id="scan" class="secondary">Scan for panels</button>
   <ul class="devices" id="devices"></ul>
   <div class="empty" id="scan_empty">No devices yet — tap “Scan for panels”.</div>
+
+  <label class="toggle">
+    <input id="rotate_180" type="checkbox">
+    Rotate display 180° (panel mounted upside-down)
+  </label>
 </div>
 
 <div class="card">
@@ -111,6 +118,7 @@ async function loadAll() {
     if (document.activeElement.id !== 'panel_mac') {
       document.getElementById('panel_mac').value = cfg.panel_mac || '';
     }
+    document.getElementById('rotate_180').checked = !!cfg.rotate_180;
     lastConfigMac = cfg.panel_mac || '';
     if (!cfg.has_token) document.getElementById('access_token').placeholder = 'no token set — paste one to save';
 
@@ -180,6 +188,7 @@ document.getElementById('save').addEventListener('click', async () => {
   params.set('text_color',  document.getElementById('text_color').value);
   params.set('bg_color',    document.getElementById('bg_color').value);
   params.set('panel_mac',   document.getElementById('panel_mac').value.trim());
+  params.set('rotate_180',  document.getElementById('rotate_180').checked ? '1' : '0');
   const tok = document.getElementById('access_token').value;
   if (tok) params.set('access_token', tok);
 

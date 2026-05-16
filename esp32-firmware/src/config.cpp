@@ -13,6 +13,7 @@ void configLoad(AppConfig& c) {
     c.textColor   = p.getUInt("fg", 0xFFFFFF);
     c.bgColor     = p.getUInt("bg", 0x000000);
     c.panelMac    = p.getString("mac", "");
+    c.rotate180   = p.getBool("rot180", false);
     p.end();
     if (c.refreshSec < 60) c.refreshSec = 60;
 }
@@ -27,6 +28,7 @@ void configSave(const AppConfig& c) {
     p.putUInt("fg", c.textColor);
     p.putUInt("bg", c.bgColor);
     p.putString("mac", c.panelMac);
+    p.putBool("rot180", c.rotate180);
     p.end();
 }
 

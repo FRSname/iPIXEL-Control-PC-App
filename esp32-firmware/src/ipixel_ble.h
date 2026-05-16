@@ -27,6 +27,11 @@ String ipixelBleStatusText();
 // Update the pinned MAC. Triggers a fresh connect on the next tick.
 void ipixelBleSetPinnedMac(const String& mac);
 
+// When true, the framebuffer is rotated 180° (pixel (x,y) → (W-1-x, H-1-y))
+// just before PNG encoding inside ipixelBleSendFrame(). Use this when the
+// panel is mounted upside-down so the renderer can stay orientation-agnostic.
+void ipixelBleSetRotate180(bool on);
+
 // Begin a non-blocking BLE scan. Results accumulate in the scan results
 // buffer; poll via ipixelBleIsScanning() / ipixelBleScanResults(). Only
 // devices whose advertised name matches the iPixel families are reported.

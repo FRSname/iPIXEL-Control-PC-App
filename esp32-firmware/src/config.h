@@ -11,6 +11,7 @@ struct AppConfig {
     uint32_t textColor;     // 0xRRGGBB
     uint32_t bgColor;       // 0xRRGGBB
     String   panelMac;      // Optional: pin to a specific panel MAC; empty = scan-and-pick
+    bool     rotate180;     // Mirror the framebuffer 180° before sending (panel mounted upside-down)
 };
 
 void configLoad(AppConfig& out);

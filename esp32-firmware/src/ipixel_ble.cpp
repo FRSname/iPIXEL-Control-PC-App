@@ -25,6 +25,8 @@ static uint32_t         g_lastAttempt  = 0;
 static bool             g_attemptedOnce = false;
 static const uint32_t   RETRY_MS       = 10000;
 
+static volatile bool    g_rotate180    = false;
+
 // Panels advertise under one of several names depending on firmware vendor.
 static bool nameLooksLikePanel(const String& name) {
     if (name.length() == 0) return false;
@@ -237,11 +239,32 @@ void ipixelBleTick() {
     tryConnect();
 }
 
+void ipixelBleSetRotate180(bool on) {
+    g_rotate180 = on;
+}
+
 bool ipixelBleSendFrame(const uint8_t* fb) {
     if (!ipixelBleIsConnected()) return false;
 
+    // If rotation is enabled, mirror the framebuffer in-place into a scratch
+    // buffer: pixel (x,y) → (W-1-x, H-1-y). Keeps the renderer orientation-
+    // agnostic so every code path (Instagram, tween frames, repush-on-reconnect)
+    // picks up the rotation automatically.
+    const uint8_t* src = fb;
+    static uint8_t rotated[FB_BYTES];
+    if (g_rotate180) {
+        for (int y = 0; y < PANEL_H; ++y) {
+            for (int x = 0; x < PANEL_W; ++x) {
+                const uint8_t* s = fb + (y * PANEL_W + x) * 3;
+                uint8_t* d = rotated + (((PANEL_H - 1 - y) * PANEL_W) + (PANEL_W - 1 - x)) * 3;
+                d[0] = s[0]; d[1] = s[1]; d[2] = s[2];
+            }
+        }
+        src = rotated;
+    }
+
     static uint8_t png[3800];   // 64x16 PNG fits within ~3540 bytes (fixed-Huffman worst case)
-    size_t pngLen = pngEncode64x16RGB(fb, png, sizeof(png));
+    size_t pngLen = pngEncode64x16RGB(src, png, sizeof(png));
     if (pngLen == 0) {
         Serial.println("[ble] PNG encode failed");
         return false;
