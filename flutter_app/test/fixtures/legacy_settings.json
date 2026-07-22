@@ -1,0 +1,19 @@
+{
+  "last_device": "AA:BB:CC:DD:EE:FF",
+  "auto_connect": true,
+  "text_use_sprite_font": false,
+  "sprite_fonts": [
+    {
+      "name": "Text Thin",
+      "path": "Gallery/Sprites/Text-thin-Sprite.png",
+      "order": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:!?.,+-/$%",
+      "cols": 73
+    },
+    {
+      "name": "My Custom Font",
+      "path": "/Users/someone/fonts/custom-sprite.png",
+      "order": "0123456789",
+      "cols": 10
+    }
+  ]
+}
