@@ -1,0 +1,136 @@
+[
+  {
+    "name": "Heart",
+    "type": "image",
+    "image_path": "Gallery/pixil-gif-drawing (1).gif",
+    "thumbnail": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAQCAIAAAAphe5+AAAAo0lEQVR4nNWWPQqAMAxGk6AncO6i9P4HcnSuFxCMQ6AUhZIhqe03hQZKXvPTIDPDyCIYXJP5jSlEMZZj17t6yUAO8WXXXb0AfMPKJxVXjz1QVkgK0fC9WwDgfNtW+Q8ZONetGQMZ3iUR80UaBis8AlMpGfodo6BgsC0tdFolZPJIQwuMyLwxCHxU5kEwnNoaXZe58gdwGkoEnspB+41UHH2dfgANB1K9/D7aTgAAAABJRU5ErkJggg=="
+  },
+  {
+    "name": "Busy",
+    "type": "text",
+    "text": "BUSY",
+    "text_color": "#ff0000",
+    "bg_color": "#ffffff",
+    "char_height": 16,
+    "animation": 0,
+    "speed": 50,
+    "rainbow": 0
+  },
+  {
+    "name": "REC",
+    "type": "image",
+    "image_path": "Gallery/REC.gif",
+    "thumbnail": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAQCAIAAAAphe5+AAACVUlEQVR4nNVVobLiMBS9ZVakLnUURSW4IoNDRhaHrSyuEssv4OATqMRVUokE1zrAUZe47LR3t9vHawo8xA5nMpmmOc3NvScnNZRS8MnowIej85iSZRBFRcuyh1zTNK2vGI/Hq9WqhWBZlmmau90OCUmSTKfTXq9nmqZRwrKstpCqBeezmkwUwL/GuUrTli90URaLRTshLZfdbrffp1zXbYloaBe9XGA4hDy/f2/bcDwCpY0fGYYBAJzzMAxL8bL5fC6ltG37fD5XBNd1gyAwTVMIgb3v+wAwHA5PpxMABEHAGCOEAEC322WMva6A532pfb15XrsCs9mstoxXD4TPXtMK5zJDAGCMqafxqzmtPC8OvQ5RVBA0IuBBr56v1ysAYC0rnE4nNIaUkpTwfT//q3a/34fn0ZzXfq8tP7b9vkUBx3H8EpX0VVEb98A5V0rFcYzDMAzfVqBWwh8QsizbbDbV0HGc9XpdJxBCLMtCWaSUmGelUiXFU2jOSwhFiLb8hOjqgWsOBgN0IQ73NblaPHA8Hr9b6CH0Jg5DbQJ6iXEHvu+jKbGodVO2JCCEwFnbtoUQbycghGKsYfetV8RdCfEyBYD1el0nUEonJRhj2G+3W6XUZDKpEzjnnudxzm+32+sJIBYLZdt/tm7barksEnuUACqglLrdbrS8rCilWFTdSY7jWCmVpqnjOHdTlNLXTVxhuSza5VK4Vn9vVgjDsDIlxt5sNkmSSCkPhwNjLAgCQgjenvV+NBqh3dM0jaLocDjkeS6lREe1RNT/iT8Enf+9gXfxG68V+YvieCuaAAAAAElFTkSuQmCC"
+  },
+  {
+    "name": "OFFLINE",
+    "type": "text",
+    "text": "OFFLINE",
+    "text_color": "#ff0000",
+    "bg_color": "#c0c0c0",
+    "char_height": 16,
+    "animation": 0,
+    "speed": 50,
+    "rainbow": 0
+  },
+  {
+    "name": "Update Logo",
+    "type": "image",
+    "image_path": "Gallery/update-ucka.gif",
+    "thumbnail": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAQCAIAAAAphe5+AAAAvElEQVR4nN2W0Q7DIAhFge4L96H7Q2Izm2ykKl4dPrj7ZIAeSm6k5ZQS7axHNcrMRATOpq938aXjCT2C87UHl7L0otuDpTgNwEqcrwBcbK5a0U3hwaGUYvCvA6O6mWv9dXwIh0tIg9vhxxl0BD7vgOVyFn6JA+FCm0vK0Ge7gWu03Cq+hvjcg/+dA5rvR8oK2Ser+eLc8YlPbEvr+NLqEfj2S/nS6oEE51Ld4DEC53IVLP05m+CzC68MsJdO5hGmg22zCqwAAAAASUVORK5CYII="
+  },
+  {
+    "name": "UCK26 - anim",
+    "type": "image",
+    "image_path": "Gallery/UCK26-Anim.gif",
+    "thumbnail": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAQCAIAAAAphe5+AAAA+0lEQVR4nNVWWw6EIAxsyX5zJA/vkTwA3cRmmwq0FdFsnC+wrxkoCBIRvBkJXo6PZUBEHvAWVVP9RdCaLsS2Dn6PmAIAoKw5LVt3iohlzZU/IkqxmVg8OmjTmIAzYFotoZOB0MQKe8lc1uxomBKQlk2aZEiDBIIRqzP7qWZ3QJc86anXEnf2Wo/j/KAAp4xD0TFx24TJ79yBFkziAnuG9NWzh1hq8KCqZB2MkH063mCOhtt+ZF2ucpPosxiyZ9AOiBDvgHMPCDOLPREx3e4qVpm11c88ICCMDx1Egx+Yfj2jNYvJuyQsm7Xw80+JMDOMPCW8A/4KpH8TmMUXw2rq3f1XSmsAAAAASUVORK5CYII="
+  },
+  {
+    "name": "ITIXO",
+    "type": "image",
+    "image_path": "Gallery/ITIXO.gif",
+    "thumbnail": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAQCAIAAAAphe5+AAAArUlEQVR4nNWVsQqGMAyEk+Dk4Ps/p4OjJ1gIsf1/pzuw32QJJHc1SR2AzUzY5IQutd/8O7JYTIO7n/vaPgB0R2KhsMkJUV4AsR19se2g74zgpmtNUluocu5rRj9qwG/dqT6vPH9IRlkewgR06hvVA7GW05syr/Zn5vfoJww8sj/7RFFrMRnjHNMfAdOt0ao+9ylxdrUGOvX1TaB7CBOQisc1Sn/LXDfEY8crZuACRxRwITV8rpAAAAAASUVORK5CYII="
+  },
+  {
+    "name": "UCK26-Countdown",
+    "type": "clock",
+    "clock_mode": "countdown",
+    "countdown_event": "UCK26",
+    "countdown_year": 2026,
+    "countdown_month": 5,
+    "countdown_day": 26,
+    "countdown_hour": 0,
+    "countdown_minute": 0,
+    "countdown_format": "days_hours_mins",
+    "countdown_color": "#00ff00",
+    "countdown_bg_color": "#FFFFFF",
+    "countdown_animation": "static",
+    "countdown_speed": 50,
+    "countdown_update_interval": 60,
+    "countdown_use_sprite_font": true,
+    "countdown_sprite_font_name": "Text Default",
+    "countdown_static_delay_seconds": 2
+  },
+  {
+    "name": "YouTube - Update",
+    "type": "youtube",
+    "channel": "UCw2tgmmR0bwhIkZ_tRib2SA",
+    "bg_color": "#FFFFFF",
+    "auto_refresh": false,
+    "refresh_interval": 300,
+    "youtube_use_sprite_font": true,
+    "youtube_sprite_font_name": "Text Default",
+    "youtube_show_logo": true,
+    "youtube_logo_path": "Gallery/Sprites/YT-btn.png"
+  },
+  {
+    "name": "Weather - Ostrava",
+    "type": "weather",
+    "location": "Ostrava",
+    "unit": "metric",
+    "format": "temp_condition",
+    "text_color": "#FFFFFF",
+    "bg_color": "#ffffff",
+    "auto_refresh": true,
+    "refresh_interval": 600,
+    "weather_use_sprite_font": true,
+    "weather_sprite_font_name": "Text Long"
+  },
+  {
+    "name": "Clock - Classic",
+    "type": "clock",
+    "clock_mode": "custom",
+    "time_format": "%H:%M:%S",
+    "clock_color": "#00ffff",
+    "clock_bg_color": "#ffffff",
+    "clock_use_time_sprite": true,
+    "clock_time_sprite_font_name": "Text Default",
+    "clock_update_interval": 1
+  },
+  {
+    "name": "Stock - BTC-USD",
+    "type": "stock",
+    "ticker": "BTC-USD",
+    "format": "price_only",
+    "bg_color": "#ffffff",
+    "auto_color": true,
+    "auto_refresh": true,
+    "refresh_interval": 60,
+    "stock_use_sprite_font": true,
+    "stock_sprite_font_name": "Text Default",
+    "stock_static_delay_seconds": 2
+  },
+  {
+    "name": "Instagram - @metro_tesin",
+    "type": "instagram",
+    "layout": "icon",
+    "format": "count_full",
+    "text_color": "#FFFFFF",
+    "bg_color": "#ffffff",
+    "auto_refresh": true,
+    "refresh_interval": 60,
+    "animate_changes": true,
+    "instagram_use_sprite_font": true,
+    "instagram_sprite_font_name": "Text Long"
+  }
+]
