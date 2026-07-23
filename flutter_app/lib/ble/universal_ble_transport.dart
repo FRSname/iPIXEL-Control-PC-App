@@ -33,6 +33,18 @@ class UniversalBleTransport implements BleTransport {
   }
 
   @override
+  Future<bool> hasPermissions({bool withAndroidFineLocation = false}) =>
+      UniversalBle.hasPermissions(
+        withAndroidFineLocation: withAndroidFineLocation,
+      );
+
+  @override
+  Future<void> requestPermissions({bool withAndroidFineLocation = false}) =>
+      UniversalBle.requestPermissions(
+        withAndroidFineLocation: withAndroidFineLocation,
+      );
+
+  @override
   Stream<BleScanResult> get scanResults => UniversalBle.scanStream.map(
     (device) => BleScanResult(
       id: device.deviceId,

@@ -45,6 +45,11 @@ class FakeBleTransport implements BleTransport {
   /// When true, [discoverServices] omits the fa03 notify characteristic.
   bool omitNotifyCharacteristic;
 
+  /// When true, [stopScan] records the call but returns a future that never
+  /// completes — simulating a platform stopScan that hangs. Lets a test verify
+  /// the caller time-bounds the wait instead of stranding on it.
+  bool stopScanHangs = false;
+
   /// Optional hook awaited inside [writeWithResponse] after the write is
   /// recorded. Lets a test inject a concurrent teardown mid-send.
   Future<void> Function(Uint8List value)? afterWrite;
@@ -90,8 +95,30 @@ class FakeBleTransport implements BleTransport {
   /// Push a scan advertisement to subscribers.
   void emitScan(BleScanResult result) => _scan.add(result);
 
+  /// When true, [requestPermissions] throws (exercises a permission denial).
+  bool permissionsThrow = false;
+
+  /// Value returned by [hasPermissions] (exercises the already-granted skip).
+  bool permissionsGranted = false;
+
   @override
   Future<BleAvailability> availability() async => availabilityState;
+
+  @override
+  Future<bool> hasPermissions({bool withAndroidFineLocation = false}) async {
+    calls.add('hasPermissions');
+    return permissionsGranted;
+  }
+
+  @override
+  Future<void> requestPermissions({
+    bool withAndroidFineLocation = false,
+  }) async {
+    calls.add('requestPermissions');
+    if (permissionsThrow) {
+      throw Exception('permissions denied');
+    }
+  }
 
   @override
   Stream<BleScanResult> get scanResults => _scan.stream;
@@ -100,7 +127,11 @@ class FakeBleTransport implements BleTransport {
   Future<void> startScan() async => calls.add('startScan');
 
   @override
-  Future<void> stopScan() async => calls.add('stopScan');
+  Future<void> stopScan() {
+    calls.add('stopScan');
+    if (stopScanHangs) return Completer<void>().future;
+    return Future<void>.value();
+  }
 
   @override
   Future<void> connect(String deviceId, {Duration? timeout}) async =>

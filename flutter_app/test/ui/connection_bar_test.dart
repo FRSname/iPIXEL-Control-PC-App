@@ -188,6 +188,59 @@ void main() {
       expect(find.textContaining('fa02'), findsNothing);
     });
 
+    testWidgets('stops the scan before connecting (no scan/connect race)', (
+      tester,
+    ) async {
+      final transport = FakeBleTransport();
+      addTearDown(transport.dispose);
+      await _pumpLive(tester, transport);
+      await _scan(tester, transport, panel);
+
+      await tester.tap(find.text('LED_BLE_1'));
+      await tester.pump();
+      await _settleConnect(tester);
+
+      // The connect path must issue stopScan and let it settle before connect,
+      // so the platform BLE stack is never asked to connect from an active scan.
+      final stopIndex = transport.calls.indexOf('stopScan');
+      final connectIndex = transport.calls.indexOf('connect');
+      expect(stopIndex, isNonNegative, reason: 'scan was stopped');
+      expect(connectIndex, isNonNegative, reason: 'connect was attempted');
+      expect(
+        stopIndex,
+        lessThan(connectIndex),
+        reason: 'stopScan must precede connect',
+      );
+    });
+
+    testWidgets('proceeds to connect when stopScan never completes', (
+      tester,
+    ) async {
+      // A platform stopScan that hangs must not strand the UI in "Connecting…":
+      // the connect path time-bounds the stop and proceeds anyway.
+      final transport = FakeBleTransport()..stopScanHangs = true;
+      addTearDown(transport.dispose);
+      await _pumpLive(tester, transport);
+      await _scan(tester, transport, panel);
+
+      await tester.tap(find.text('LED_BLE_1'));
+      await tester.pump();
+
+      // Before the 2 s timeout elapses the stop is still pending, so connect
+      // has not been issued yet.
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(transport.calls, contains('stopScan'));
+      expect(transport.calls, isNot(contains('connect')));
+
+      // Pump past the 2 s stop-scan timeout, then let the handshake settle.
+      await tester.pump(const Duration(seconds: 2));
+      await _settleConnect(tester);
+
+      expect(transport.calls, contains('connect'));
+      expect(find.text('Panel connected'), findsOneWidget);
+      expect(find.text('Disconnect'), findsOneWidget);
+    });
+
     testWidgets('double-tapping a chip only connects once', (tester) async {
       final transport = FakeBleTransport();
       addTearDown(transport.dispose);
