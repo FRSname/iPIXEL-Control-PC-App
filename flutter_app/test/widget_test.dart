@@ -1,17 +1,30 @@
-// Smoke test for the iPixel Controller placeholder app.
+// Smoke test for the iPixel Controller app shell.
 //
-// Verifies the app boots and renders its title without errors.
+// Verifies the app boots into the responsive shell and shows the Home page.
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:ipixel_controller/main.dart';
+import 'package:ipixel_controller/ble/providers.dart';
+import 'package:ipixel_controller/ui/app.dart';
+
+import 'ble/fake_ble_transport.dart';
 
 void main() {
-  testWidgets('renders the iPixel Controller placeholder', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: IPixelControllerApp()));
+  testWidgets('boots into the shell showing the Home page', (tester) async {
+    final transport = FakeBleTransport();
+    addTearDown(transport.dispose);
 
-    // Title appears in both the AppBar and the body.
-    expect(find.text('iPixel Controller'), findsNWidgets(2));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [bleTransportProvider.overrideWithValue(transport)],
+        child: const IPixelControllerApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('page-home')), findsOneWidget);
+    expect(find.text('Scan'), findsOneWidget);
   });
 }

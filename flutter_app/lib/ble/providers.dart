@@ -12,12 +12,23 @@ import 'package:ipixel_controller/config/config_store.dart';
 import 'package:ipixel_controller/config/providers.dart';
 
 import 'device_session.dart';
+import 'scanner.dart';
 import 'transport.dart';
 import 'universal_ble_transport.dart';
 
 /// The BLE transport. Overridden in tests with a fake.
 final bleTransportProvider = Provider<BleTransport>((ref) {
   return UniversalBleTransport();
+});
+
+/// The single [PanelScanner], bound to the same transport as the session.
+///
+/// Wiring only — [PanelScanner] is the S4 scanner; this just exposes it to the
+/// UI so the connection bar can drive scans without importing the transport.
+final panelScannerProvider = Provider<PanelScanner>((ref) {
+  final scanner = PanelScanner(ref.watch(bleTransportProvider));
+  ref.onDispose(scanner.dispose);
+  return scanner;
 });
 
 /// The single [DeviceSession] for the app, disposed with the container.
