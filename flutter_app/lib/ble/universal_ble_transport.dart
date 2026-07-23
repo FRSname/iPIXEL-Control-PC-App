@@ -20,17 +20,12 @@ class UniversalBleTransport implements BleTransport {
   UniversalBleTransport();
 
   @override
-  Future<BleAvailability> availability() async {
-    final state = await UniversalBle.getBluetoothAvailabilityState();
-    return switch (state) {
-      AvailabilityState.unknown => BleAvailability.unknown,
-      AvailabilityState.resetting => BleAvailability.resetting,
-      AvailabilityState.unsupported => BleAvailability.unsupported,
-      AvailabilityState.unauthorized => BleAvailability.unauthorized,
-      AvailabilityState.poweredOff => BleAvailability.poweredOff,
-      AvailabilityState.poweredOn => BleAvailability.poweredOn,
-    };
-  }
+  Future<BleAvailability> availability() async =>
+      _mapAvailability(await UniversalBle.getBluetoothAvailabilityState());
+
+  @override
+  Stream<BleAvailability> get availabilityChanges =>
+      UniversalBle.availabilityStream.map(_mapAvailability);
 
   @override
   Future<bool> hasPermissions({bool withAndroidFineLocation = false}) =>
@@ -122,3 +117,15 @@ class UniversalBleTransport implements BleTransport {
   Future<int> requestMtu(String deviceId, int expectedMtu) =>
       UniversalBle.requestMtu(deviceId, expectedMtu);
 }
+
+/// Maps universal_ble's [AvailabilityState] onto the framework-agnostic
+/// [BleAvailability]. Shared by the one-shot [UniversalBleTransport.availability]
+/// query and the [UniversalBleTransport.availabilityChanges] stream.
+BleAvailability _mapAvailability(AvailabilityState state) => switch (state) {
+  AvailabilityState.unknown => BleAvailability.unknown,
+  AvailabilityState.resetting => BleAvailability.resetting,
+  AvailabilityState.unsupported => BleAvailability.unsupported,
+  AvailabilityState.unauthorized => BleAvailability.unauthorized,
+  AvailabilityState.poweredOff => BleAvailability.poweredOff,
+  AvailabilityState.poweredOn => BleAvailability.poweredOn,
+};

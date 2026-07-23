@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:ipixel_controller/ble/ble_permissions.dart';
+import 'package:ipixel_controller/ble/ble_readiness.dart';
 import 'package:ipixel_controller/ble/device_session.dart';
 import 'package:ipixel_controller/ble/providers.dart';
 import 'package:ipixel_controller/ble/scanner.dart';
@@ -42,6 +43,12 @@ class ConnectionBar extends ConsumerStatefulWidget {
 class _ConnectionBarState extends ConsumerState<ConnectionBar> {
   bool _scanning = false;
 
+  /// Set synchronously when a scan is requested so a second "Scan" tap during the
+  /// pre-scan async work — the permission gate and the up-to-20s adapter-readiness
+  /// wait, both of which leave the Scan button visible — can't launch a second
+  /// concurrent scan before the first flips [_scanning].
+  bool _starting = false;
+
   /// Set synchronously the instant a chip is tapped so a rapid second tap (or a
   /// rebuild) can't launch a second `connect()` before the first `await`.
   bool _connecting = false;
@@ -51,29 +58,49 @@ class _ConnectionBarState extends ConsumerState<ConnectionBar> {
   PanelScanner? _scanner;
 
   Future<void> _startScan() async {
-    // Gate on runtime BLE permissions (Android shows a rationale first; other
-    // platforms pass through). Bail quietly if the user declines or the OS
-    // denies — the gate surfaces its own message.
-    final granted = await ensureBlePermissions(
-      context,
-      ref.read(bleTransportProvider),
-    );
-    if (!granted || !mounted) return;
-
-    final scanner = ref.read(panelScannerProvider);
-    _scanner = scanner;
-    setState(() => _scanning = true);
+    // Reject a re-entrant tap while the previous request is still in its pre-scan
+    // async work (permission gate + readiness wait), before [_scanning] flips the
+    // button to "Stop". Without this a double-tap during the up-to-20s readiness
+    // wait would fire two concurrent scans at the transport.
+    if (_starting || _scanning) return;
+    _starting = true;
     try {
-      await scanner.start();
-    } on Exception catch (error, stack) {
-      log(
-        'Starting scan failed',
-        name: _logName,
-        error: error,
-        stackTrace: stack,
-      );
-      _showError('Could not start scanning. Check that Bluetooth is on.');
-      if (mounted) setState(() => _scanning = false);
+      // Gate on runtime BLE permissions (Android shows a rationale first; other
+      // platforms pass through). Bail quietly if the user declines or the OS
+      // denies — the gate surfaces its own message.
+      final transport = ref.read(bleTransportProvider);
+      final granted = await ensureBlePermissions(context, transport);
+      if (!granted || !mounted) return;
+
+      // Wait for the adapter to be powered on before scanning. Starting a scan
+      // while CoreBluetooth is still initialising / the first-launch permission
+      // prompt is unresolved crashes the app on macOS; gating on readiness turns
+      // that crash into either a clean scan or a clear message. Subscribing to
+      // the availability stream inside here is also what surfaces the OS prompt.
+      final availability = await waitForAdapterReady(transport);
+      if (!mounted) return;
+      if (availability != BleAvailability.poweredOn) {
+        _showError(_adapterNotReadyMessage(availability));
+        return;
+      }
+
+      final scanner = ref.read(panelScannerProvider);
+      _scanner = scanner;
+      setState(() => _scanning = true);
+      try {
+        await scanner.start();
+      } on Exception catch (error, stack) {
+        log(
+          'Starting scan failed',
+          name: _logName,
+          error: error,
+          stackTrace: stack,
+        );
+        _showError('Could not start scanning. Check that Bluetooth is on.');
+        if (mounted) setState(() => _scanning = false);
+      }
+    } finally {
+      _starting = false;
     }
   }
 
@@ -185,6 +212,19 @@ class _ConnectionBarState extends ConsumerState<ConnectionBar> {
         );
         return 'Could not connect to the panel.';
     }
+  }
+
+  /// Short, user-facing reason a scan could not start because the adapter is not
+  /// [BleAvailability.poweredOn]. Never called for `poweredOn` (the scan runs).
+  String _adapterNotReadyMessage(BleAvailability availability) {
+    return switch (availability) {
+      BleAvailability.poweredOff => 'Turn on Bluetooth to scan for panels.',
+      BleAvailability.unauthorized =>
+        'Bluetooth access is off. Enable it in System Settings and try again.',
+      BleAvailability.unsupported => 'This device has no Bluetooth adapter.',
+      // unknown / resetting / poweredOn: the adapter never became ready in time.
+      _ => 'Bluetooth isn’t ready yet. Try again in a moment.',
+    };
   }
 
   void _showError(String message) {

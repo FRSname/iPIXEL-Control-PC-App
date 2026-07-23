@@ -24,6 +24,15 @@
 /// writes below what the panel sustains. Because [scrollIntervalMs] is read
 /// fresh on every reschedule, a live speed change (see [ScrollSpeedControl])
 /// takes effect on the next frame without restarting the scroll.
+///
+/// ## Velocity vs frame rate
+///
+/// Each scroll frame awaits the panel's send_image ACK (see
+/// `DeviceSession.sendImage`), so the real per-frame cadence is bounded by the
+/// BLE ACK round-trip, not the timer — shortening the interval below the ACK time
+/// buys nothing. The top of the speed slider therefore gains its speed by
+/// advancing several pixels per frame ([scrollStepPx]) rather than by sending
+/// frames faster, keeping the BLE write cadence in the panel-safe band.
 library;
 
 import 'dart:async';
@@ -86,14 +95,39 @@ int scrollIntervalMs(int speed) {
   return kScrollMinIntervalMs + offset;
 }
 
+/// Largest per-frame pixel advance, reached at the top of the speed slider.
+///
+/// The per-frame *interval* is BLE-bound — each scroll frame awaits the panel's
+/// send_image ACK, so it cannot meaningfully drop below the ACK round-trip.
+/// Scroll velocity is therefore raised at the fast end by advancing several
+/// pixels per frame rather than by sending frames faster. Kept small so the
+/// motion stays a readable scroll instead of a jumpy teleport.
+const int kScrollMaxStepPx = 4;
+
+/// Maps a UI speed (1..100) to a per-frame pixel advance
+/// (1..[kScrollMaxStepPx]).
+///
+/// Monotonic and non-decreasing: speed 1 → 1 px (smoothest), speed 100 →
+/// [kScrollMaxStepPx] px (fastest). Because each scroll frame awaits the panel
+/// ACK, the frame interval is BLE-bound; advancing multiple pixels per frame is
+/// what gives the top of the slider its speed. Always ≥ 1.
+int scrollStepPx(int speed) {
+  final clamped = speed < 1 ? 1 : (speed > 100 ? 100 : speed);
+  return 1 + ((kScrollMaxStepPx - 1) * (clamped - 1) / 99).round();
+}
+
 /// Advances a scroll [offset] by [step], wrapping at the ends of the strip.
 ///
 /// Forward (step > 0) wraps back to 0 after passing [maxOffset]; reverse wraps
-/// to [maxOffset] after passing 0. Mirrors the Python `_scroll_tick` wrap.
+/// to [maxOffset] after passing 0. A step larger than one (see [scrollStepPx])
+/// that would overshoot the far edge first *lands on the edge* and only wraps on
+/// the following frame — otherwise a multi-pixel step would skip the last few
+/// columns of the text every cycle. With a unit step the edge is always hit
+/// exactly, so this matches the Python `_scroll_tick` wrap.
 int advanceScrollOffset(int offset, int step, int maxOffset) {
   final next = offset + step;
-  if (next > maxOffset) return 0;
-  if (next < 0) return maxOffset;
+  if (next > maxOffset) return offset == maxOffset ? 0 : maxOffset;
+  if (next < 0) return offset == 0 ? maxOffset : 0;
   return next;
 }
 
@@ -397,9 +431,20 @@ class _ScrollTask implements DisplayTask, ScrollSpeedControl {
     );
   }
 
+  /// Signed per-frame advance: the direction ([_step], ±1) times the
+  /// speed-scaled magnitude ([scrollStepPx]), clamped so it never exceeds the
+  /// strip's travel — a magnitude larger than [_maxOffset] would overshoot and
+  /// wrap on every frame, so the text would flicker in place instead of scroll.
+  int _frameStep() {
+    var magnitude = scrollStepPx(speed);
+    if (magnitude > _maxOffset) magnitude = _maxOffset;
+    if (magnitude < 1) magnitude = 1;
+    return _step * magnitude;
+  }
+
   Future<void> _tick() async {
     if (!_running) return;
-    _offset = advanceScrollOffset(_offset, _step, _maxOffset);
+    _offset = advanceScrollOffset(_offset, _frameStep(), _maxOffset);
     try {
       await _renderSend();
     } on Exception catch (error, stack) {

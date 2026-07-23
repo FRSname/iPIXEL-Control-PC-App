@@ -57,6 +57,8 @@ class FakeBleTransport implements BleTransport {
   final List<String> calls = <String>[];
   final List<Uint8List> writes = <Uint8List>[];
 
+  final StreamController<BleAvailability> _availability =
+      StreamController<BleAvailability>.broadcast();
   final StreamController<BleScanResult> _scan =
       StreamController<BleScanResult>.broadcast();
   final StreamController<Uint8List> _notify =
@@ -103,6 +105,17 @@ class FakeBleTransport implements BleTransport {
 
   @override
   Future<BleAvailability> availability() async => availabilityState;
+
+  @override
+  Stream<BleAvailability> get availabilityChanges => _availability.stream;
+
+  /// Updates the reported adapter state and pushes it to [availabilityChanges]
+  /// subscribers — lets a test drive the readiness gate (e.g. adapter powers on
+  /// mid-wait, or settles on a terminal state).
+  void emitAvailability(BleAvailability state) {
+    availabilityState = state;
+    if (!_availability.isClosed) _availability.add(state);
+  }
 
   @override
   Future<bool> hasPermissions({bool withAndroidFineLocation = false}) async {
@@ -225,6 +238,7 @@ class FakeBleTransport implements BleTransport {
   }
 
   Future<void> dispose() async {
+    await _availability.close();
     await _scan.close();
     await _notify.close();
     await _conn.close();

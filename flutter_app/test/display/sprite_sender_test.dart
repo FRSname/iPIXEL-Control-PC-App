@@ -77,6 +77,16 @@ void main() {
       expect(advanceScrollOffset(1, -1, 3), 0);
       expect(advanceScrollOffset(0, -1, 3), 3);
     });
+
+    test('a multi-pixel step lands on the far edge before wrapping', () {
+      // Forward: an overshooting step lands exactly on maxOffset (so the last
+      // columns are shown), then wraps to 0 on the following frame.
+      expect(advanceScrollOffset(8, 4, 10), 10);
+      expect(advanceScrollOffset(10, 4, 10), 0);
+      // Reverse: an overshooting step lands on 0, then wraps to maxOffset.
+      expect(advanceScrollOffset(2, -4, 10), 0);
+      expect(advanceScrollOffset(0, -4, 10), 10);
+    });
   });
 
   group('scrollIntervalMs', () {
@@ -117,6 +127,33 @@ void main() {
       expect(scrollIntervalMs(-5), kScrollMaxIntervalMs);
       expect(scrollIntervalMs(101), kScrollMinIntervalMs);
       expect(scrollIntervalMs(500), kScrollMinIntervalMs);
+    });
+  });
+
+  group('scrollStepPx', () {
+    test('spans 1 px at the slow end to kScrollMaxStepPx at the fast end', () {
+      expect(scrollStepPx(1), 1);
+      expect(scrollStepPx(100), kScrollMaxStepPx);
+    });
+
+    test('is monotonic non-decreasing across the slider', () {
+      var previous = scrollStepPx(1);
+      for (var speed = 2; speed <= 100; speed++) {
+        final step = scrollStepPx(speed);
+        expect(step, greaterThanOrEqualTo(previous));
+        previous = step;
+      }
+    });
+
+    test('the fast end steps more pixels than the slow end', () {
+      expect(scrollStepPx(100), greaterThan(scrollStepPx(1)));
+    });
+
+    test('clamps out-of-range speeds to the 1..max band', () {
+      expect(scrollStepPx(0), 1);
+      expect(scrollStepPx(-5), 1);
+      expect(scrollStepPx(101), kScrollMaxStepPx);
+      expect(scrollStepPx(500), kScrollMaxStepPx);
     });
   });
 
@@ -330,6 +367,69 @@ void main() {
           reason: 'next frame uses the updated speed',
         );
         expect(scrollIntervalMs(100), kScrollMinIntervalMs);
+      },
+    );
+
+    test(
+      'the fast speed advances several pixels per frame, wrapping much sooner',
+      () async {
+        bool sameBytes(Uint8List a, Uint8List b) {
+          if (a.length != b.length) return false;
+          for (var i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) return false;
+          }
+          return true;
+        }
+
+        // Drives a scroll at [speed], returning the send index at which the
+        // offset-0 frame recurs (a full wrap), or -1 if it has not wrapped
+        // within the fired window. A larger per-frame pixel step wraps sooner.
+        Future<int> wrapIndexAtSpeed(int speed) async {
+          final scheduler = _ManualScheduler();
+          final sends = <Uint8List>[];
+          final sender = SpriteSender(
+            fonts: _textFontService(),
+            send: (png) async => sends.add(png),
+            publishFrame: (_) {},
+            timerFactory: scheduler.factory,
+          );
+          final task = sender.scrollText(
+            text: 'ABCDEFGHIJKLMNOP',
+            fontName: 'Text Default',
+            // A contrasting background makes each 64-wide window pixel-distinct,
+            // so a recurring offset-0 frame reliably signals a full wrap (on a
+            // matching background the strip is uniform and the offset is
+            // unobservable from frame content).
+            bgColor: '#FFFFFF',
+            speed: speed,
+            reverse: false,
+          );
+          await task.start(); // sends[0] is offset 0
+          for (var fired = 0; fired < 20; fired++) {
+            scheduler.latest.fire();
+            await _pump();
+            if (sameBytes(sends.last, sends.first)) {
+              await task.stop();
+              return sends.length - 1;
+            }
+          }
+          await task.stop();
+          return -1;
+        }
+
+        final fast = await wrapIndexAtSpeed(100);
+        final slow = await wrapIndexAtSpeed(1);
+
+        expect(
+          fast,
+          greaterThan(0),
+          reason: 'fast speed steps multiple px/frame and wraps within 20',
+        );
+        expect(
+          slow,
+          -1,
+          reason: 'slow speed (1 px/frame) does not wrap within 20 frames',
+        );
       },
     );
 

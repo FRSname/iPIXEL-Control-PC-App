@@ -258,4 +258,51 @@ void main() {
       expect(connects, 1);
     });
   });
+
+  group('adapter readiness gate', () {
+    testWidgets('waits for the adapter, then scans once it powers on', (
+      tester,
+    ) async {
+      // Scanning before the adapter is powered on crashes on macOS. The bar must
+      // hold the scan until availability reports poweredOn.
+      final transport = FakeBleTransport(
+        availabilityState: BleAvailability.poweredOff,
+      );
+      addTearDown(transport.dispose);
+      await _pumpLive(tester, transport);
+
+      await tester.tap(find.text('Scan'));
+      await tester.pump();
+      await tester.pump();
+
+      // Adapter not ready → no scan started yet, Scan button still shown.
+      expect(transport.calls, isNot(contains('startScan')));
+      expect(find.text('Scan'), findsOneWidget);
+
+      // Adapter powers on → the gate releases and the scan begins.
+      transport.emitAvailability(BleAvailability.poweredOn);
+      await tester.pump();
+      await tester.pump();
+
+      expect(transport.calls, contains('startScan'));
+      expect(find.text('Stop'), findsOneWidget);
+    });
+
+    testWidgets('shows a message and does not scan without an adapter', (
+      tester,
+    ) async {
+      final transport = FakeBleTransport(
+        availabilityState: BleAvailability.unsupported,
+      );
+      addTearDown(transport.dispose);
+      await _pumpLive(tester, transport);
+
+      await tester.tap(find.text('Scan'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(transport.calls, isNot(contains('startScan')));
+      expect(find.textContaining('no Bluetooth adapter'), findsOneWidget);
+    });
+  });
 }

@@ -84,6 +84,15 @@ abstract interface class BleTransport {
   /// Current adapter availability. Used to surface permission failures clearly.
   Future<BleAvailability> availability();
 
+  /// Broadcast stream of adapter-availability transitions.
+  ///
+  /// Used to wait for the adapter to reach [BleAvailability.poweredOn] before a
+  /// scan. On macOS/iOS the first subscription initialises CoreBluetooth and
+  /// triggers the system Bluetooth-permission prompt; calling [startScan] before
+  /// the adapter is powered on there crashes the app, so callers gate on this
+  /// first (see `ble_readiness.dart`).
+  Stream<BleAvailability> get availabilityChanges;
+
   /// Whether the runtime BLE permissions are already granted.
   ///
   /// Lets callers skip a "why we need Bluetooth" rationale when the OS has
