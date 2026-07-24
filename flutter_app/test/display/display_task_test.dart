@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,6 +26,27 @@ class _FakeTask implements DisplayTask {
   Future<void> stop() async {
     stopCount++;
     if (stopError != null) throw stopError!;
+  }
+}
+
+/// A task whose stop() blocks on an external gate — lets a test hold the slot
+/// mid-teardown so later run() calls pile up behind it.
+class _GatedStopTask implements DisplayTask {
+  _GatedStopTask(this._gate);
+
+  final Future<void> _gate;
+  int startCount = 0;
+  int stopCount = 0;
+  bool get started => startCount > 0;
+  bool get stopped => stopCount > 0;
+
+  @override
+  Future<void> start() async => startCount++;
+
+  @override
+  Future<void> stop() async {
+    stopCount++;
+    await _gate;
   }
 }
 
@@ -68,6 +91,33 @@ void main() {
     await controller.run(taskB);
 
     expect(order, <String>['A.start', 'A.stop', 'B.start']);
+  });
+
+  test('overlapping run() calls never orphan a task', () async {
+    // taskA's stop() is gated so two more run() calls pile up behind the first
+    // restart while it is still tearing A down — the exact shape a burst of
+    // clock control changes produces. Unserialized, runC would read the same
+    // stale `_current` (A) as runB, so B would be installed then overwritten by
+    // C without ever being stopped: a leaked, still-ticking task.
+    final gate = Completer<void>();
+    final taskA = _GatedStopTask(gate.future);
+    final taskB = _FakeTask();
+    final taskC = _FakeTask();
+
+    await controller.run(taskA);
+
+    final runB = controller.run(taskB);
+    final runC = controller.run(taskC);
+
+    gate.complete(); // release A's stop()
+    await runB;
+    await runC;
+
+    expect(taskA.stopped, isTrue);
+    expect(taskB.stopped, isTrue, reason: 'B must be stopped, not orphaned');
+    expect(taskC.started, isTrue);
+    expect(taskC.stopped, isFalse, reason: 'C is the final active task');
+    expect(container.read(activeDisplayTaskProvider), isTrue);
   });
 
   test('clear stops and empties the slot', () async {
