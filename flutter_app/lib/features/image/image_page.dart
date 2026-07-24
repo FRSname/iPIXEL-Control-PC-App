@@ -21,6 +21,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
 
 import 'package:ipixel_controller/ble/device_session.dart';
 import 'package:ipixel_controller/ble/providers.dart';
@@ -43,16 +44,22 @@ class ImageFeaturePage extends ConsumerStatefulWidget {
 }
 
 class _ImageFeaturePageState extends ConsumerState<ImageFeaturePage> {
-  Uint8List? _sourceBytes;
   String? _sourceName;
   bool _isGif = false;
-  List<PanelGifFrame>? _gifFrames;
+
+  /// Cached decode of the current pick. Exactly one is non-null when an image is
+  /// loaded: [_decodedFrames] for an animated GIF, [_decodedImage] for a static
+  /// image (or a single-frame GIF). Decoding happens once per pick; fit and
+  /// background changes only re-run the cheap fit step over these.
+  List<DecodedGifFrame>? _decodedFrames;
+  img.Image? _decodedImage;
+
   PanelFit _fit = PanelFit.letterbox;
   String _bgColor = '#000000';
   bool _picking = false;
   bool _sending = false;
 
-  bool get _hasImage => _sourceBytes != null;
+  bool get _hasImage => _decodedFrames != null || _decodedImage != null;
 
   Future<void> _pick() async {
     setState(() => _picking = true);
@@ -67,59 +74,63 @@ class _ImageFeaturePageState extends ConsumerState<ImageFeaturePage> {
     }
   }
 
-  /// Decodes [picked], deciding static-vs-GIF, and publishes a preview frame.
+  /// Decodes [picked] once, deciding static-vs-GIF, caches the raw frames, and
+  /// publishes a fitted preview frame.
   void _loadPicked(PickedImage picked) {
     try {
       if (picked.name.toLowerCase().endsWith('.gif')) {
-        final frames = extractGifFrames(
-          picked.bytes,
-          fit: _fit,
-          bgColor: _bgColor,
-        );
+        final frames = decodeGifFrames(picked.bytes);
         if (frames.length > 1) {
           setState(() {
-            _sourceBytes = picked.bytes;
             _sourceName = picked.name;
             _isGif = true;
-            _gifFrames = frames;
+            _decodedFrames = frames;
+            _decodedImage = null;
           });
-          _publishPreview(frames.first.png);
+          _publishPreview(
+            fitGifFrames(frames, fit: _fit, bgColor: _bgColor).first.png,
+          );
           return;
         }
+        // A single-frame GIF is really a static image; reuse its one already
+        // decoded frame instead of decoding the bytes a second time.
+        _setStatic(picked.name, frames.first.image);
+        return;
       }
-      final png = fitImageToPanelPng(
-        picked.bytes,
-        fit: _fit,
-        bgColor: _bgColor,
-      );
-      setState(() {
-        _sourceBytes = picked.bytes;
-        _sourceName = picked.name;
-        _isGif = false;
-        _gifFrames = null;
-      });
-      _publishPreview(png);
+      _setStatic(picked.name, decodePanelImage(picked.bytes));
     } on ImageDecodeException catch (error) {
       _showError(error.message);
     }
   }
 
-  /// Re-fits the current source after a fit/background change.
+  /// Caches a decoded static [image] and publishes its fitted preview.
+  void _setStatic(String name, img.Image image) {
+    setState(() {
+      _sourceName = name;
+      _isGif = false;
+      _decodedFrames = null;
+      _decodedImage = image;
+    });
+    _publishPreview(
+      fitDecodedImageToPanelPng(image, fit: _fit, bgColor: _bgColor),
+    );
+  }
+
+  /// Re-fits the cached decode after a fit/background change.
+  ///
+  /// Pure fit + encode over the already-decoded frames — no re-decode — so it
+  /// cannot raise an [ImageDecodeException].
   void _recompute() {
-    final bytes = _sourceBytes;
-    if (bytes == null) return;
-    try {
-      if (_isGif) {
-        final frames = extractGifFrames(bytes, fit: _fit, bgColor: _bgColor);
-        setState(() => _gifFrames = frames);
-        _publishPreview(frames.first.png);
-      } else {
-        _publishPreview(
-          fitImageToPanelPng(bytes, fit: _fit, bgColor: _bgColor),
-        );
-      }
-    } on ImageDecodeException catch (error) {
-      _showError(error.message);
+    final frames = _decodedFrames;
+    final image = _decodedImage;
+    if (frames != null) {
+      _publishPreview(
+        fitGifFrames(frames, fit: _fit, bgColor: _bgColor).first.png,
+      );
+    } else if (image != null) {
+      _publishPreview(
+        fitDecodedImageToPanelPng(image, fit: _fit, bgColor: _bgColor),
+      );
     }
   }
 
@@ -138,11 +149,6 @@ class _ImageFeaturePageState extends ConsumerState<ImageFeaturePage> {
   }
 
   Future<void> _send() async {
-    final bytes = _sourceBytes;
-    if (bytes == null) {
-      _showError('Pick an image first.');
-      return;
-    }
     final status =
         ref.read(connectionStatusProvider).value ??
         BleConnectionStatus.disconnected;
@@ -155,19 +161,16 @@ class _ImageFeaturePageState extends ConsumerState<ImageFeaturePage> {
       send: ref.read(panelImageSinkProvider),
       publishFrame: ref.read(panelPreviewProvider.notifier).setFrame,
     );
+    // Fit the cached decode — no re-decode, so this cannot fail to decode.
     final DisplayTask task;
-    try {
-      if (_isGif) {
-        final frames =
-            _gifFrames ?? extractGifFrames(bytes, fit: _fit, bgColor: _bgColor);
-        task = sender.gifLoop(frames);
-      } else {
-        task = sender.staticImage(
-          fitImageToPanelPng(bytes, fit: _fit, bgColor: _bgColor),
-        );
-      }
-    } on ImageDecodeException catch (error) {
-      _showError(error.message);
+    if (_decodedFrames case final frames?) {
+      task = sender.gifLoop(fitGifFrames(frames, fit: _fit, bgColor: _bgColor));
+    } else if (_decodedImage case final image?) {
+      task = sender.staticImage(
+        fitDecodedImageToPanelPng(image, fit: _fit, bgColor: _bgColor),
+      );
+    } else {
+      _showError('Pick an image first.');
       return;
     }
 
@@ -219,7 +222,7 @@ class _ImageFeaturePageState extends ConsumerState<ImageFeaturePage> {
             _SourceCard(
               fileName: _sourceName,
               isGif: _isGif,
-              gifFrameCount: _gifFrames?.length ?? 0,
+              gifFrameCount: _decodedFrames?.length ?? 0,
               picking: _picking,
               onPick: _pick,
             ),

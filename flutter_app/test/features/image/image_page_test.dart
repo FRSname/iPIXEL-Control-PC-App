@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,9 @@ import 'package:image/image.dart' as img;
 
 import 'package:ipixel_controller/ble/device_session.dart';
 import 'package:ipixel_controller/ble/providers.dart';
+import 'package:ipixel_controller/display/display_task.dart';
 import 'package:ipixel_controller/display/providers.dart';
+import 'package:ipixel_controller/features/image/gif_frames.dart';
 import 'package:ipixel_controller/features/image/image_page.dart';
 import 'package:ipixel_controller/features/image/image_picker_service.dart';
 import 'package:ipixel_controller/render/panel_image.dart';
@@ -40,6 +43,25 @@ Uint8List _solidPng(int w, int h) {
 
 PickedImage _staticPicked() =>
     PickedImage(bytes: _solidPng(32, 32), name: 'photo.png');
+
+/// Builds an animated GIF with [frameCount] visually distinct 8x8 frames, each
+/// authored for [frameMs] (a multiple of 10 ms so it survives the GIF format's
+/// centisecond delay field on the decode round-trip).
+Uint8List _gifBytes({int frameCount = 3, int frameMs = 100}) {
+  final anim = img.Image(width: 8, height: 8, numChannels: 3)
+    ..frameDuration = frameMs;
+  img.fill(anim, color: img.ColorRgb8(255, 0, 0));
+  for (var i = 1; i < frameCount; i++) {
+    final frame = anim.addFrame()..frameDuration = frameMs;
+    img.fill(
+      frame,
+      color: img.ColorRgb8(0, (40 + i * 60) % 256, (i * 30) % 256),
+    );
+  }
+  return img.encodeGif(anim);
+}
+
+PickedImage _gifPicked() => PickedImage(bytes: _gifBytes(), name: 'loop.gif');
 
 Widget _harness({
   required BleConnectionStatus status,
@@ -182,5 +204,152 @@ void main() {
     // A 32x32 square letterboxes with padding but crops to a full fill, so the
     // two preview frames differ.
     expect(cropPreview, isNot(equals(letterboxPreview)));
+  });
+
+  testWidgets('picking a GIF reports its frames and loops through the task', (
+    tester,
+  ) async {
+    final sink = _RecordingSink();
+    await tester.pumpWidget(
+      _harness(
+        status: BleConnectionStatus.ready,
+        sink: sink,
+        picker: _FakePicker(_gifPicked()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Pick image or GIF'));
+    await tester.pumpAndSettle();
+
+    // The source subtitle reports the animated GIF and its decoded frame count.
+    expect(find.textContaining('animated GIF'), findsOneWidget);
+    expect(find.textContaining('frames'), findsOneWidget);
+
+    final sendButton = find.widgetWithText(FilledButton, 'Send to panel');
+    await tester.ensureVisible(sendButton);
+    await tester.tap(sendButton);
+    // A live loop keeps a timer pending forever, so avoid pumpAndSettle.
+    await tester.pump();
+    await tester.pump();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ImageFeaturePage)),
+    );
+    expect(
+      container.read(activeDisplayTaskProvider),
+      isTrue,
+      reason: 'the GIF loop task is active after sending',
+    );
+    final framesAfterStart = sink.pngs.length;
+    expect(framesAfterStart, greaterThanOrEqualTo(1));
+
+    // Advancing past the panel-floored interval sends the next frame.
+    await tester.pump(
+      const Duration(milliseconds: kGifMinFrameIntervalMs + 20),
+    );
+    await tester.pump();
+    expect(
+      sink.pngs.length,
+      greaterThan(framesAfterStart),
+      reason: 'the loop repeats frames onto the panel',
+    );
+
+    // Stop the loop so no timer outlives the test.
+    await container.read(activeDisplayTaskProvider.notifier).clear();
+    await tester.pump();
+  });
+
+  testWidgets('disconnecting stops a running GIF loop', (tester) async {
+    final sink = _RecordingSink();
+    final statusController = StreamController<BleConnectionStatus>.broadcast();
+    addTearDown(statusController.close);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          connectionStatusProvider.overrideWith(
+            (ref) => statusController.stream,
+          ),
+          panelImageSinkProvider.overrideWithValue(sink.call),
+          panelImagePickerProvider.overrideWithValue(_FakePicker(_gifPicked())),
+        ],
+        child: const MaterialApp(home: Scaffold(body: ImageFeaturePage())),
+      ),
+    );
+    statusController.add(BleConnectionStatus.ready);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Pick image or GIF'));
+    await tester.pumpAndSettle();
+
+    final sendButton = find.widgetWithText(FilledButton, 'Send to panel');
+    await tester.ensureVisible(sendButton);
+    await tester.tap(sendButton);
+    // Not pumpAndSettle: the loop keeps a timer pending forever.
+    await tester.pump();
+    await tester.pump();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ImageFeaturePage)),
+    );
+    expect(
+      container.read(activeDisplayTaskProvider),
+      isTrue,
+      reason: 'the GIF loop is running while connected',
+    );
+    final framesBeforeDisconnect = sink.pngs.length;
+
+    // Drop the connection: the page's ref.listen clears the active task.
+    statusController.add(BleConnectionStatus.disconnected);
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      container.read(activeDisplayTaskProvider),
+      isFalse,
+      reason: 'the disconnect listener cleared the GIF loop',
+    );
+
+    // The loop timer is cancelled: advancing time yields no further frames.
+    await tester.pump(
+      const Duration(milliseconds: kGifMinFrameIntervalMs + 20),
+    );
+    expect(
+      sink.pngs.length,
+      framesBeforeDisconnect,
+      reason: 'the loop stopped writing frames',
+    );
+  });
+
+  testWidgets('a corrupt pick shows a SnackBar and sends nothing', (
+    tester,
+  ) async {
+    final sink = _RecordingSink();
+    final corrupt = PickedImage(
+      bytes: Uint8List.fromList(<int>[9, 9, 9, 9]),
+      name: 'corrupt.png',
+    );
+    await tester.pumpWidget(
+      _harness(
+        status: BleConnectionStatus.ready,
+        sink: sink,
+        picker: _FakePicker(corrupt),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Pick image or GIF'));
+    // Let the async pick resolve and the error SnackBar build.
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(SnackBar), findsOneWidget);
+    expect(sink.pngs, isEmpty);
+    // Nothing decoded, so the send button stays disabled.
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Send to panel'),
+    );
+    expect(button.onPressed, isNull);
   });
 }

@@ -41,6 +41,23 @@ class PanelGifFrame {
   final int durationMs;
 }
 
+/// A raw, un-fitted GIF frame: the decoded source [image] and its authored
+/// duration.
+///
+/// This is the cheap-to-produce, expensive-to-decode half of the pipeline. The
+/// page decodes a picked GIF into these *once* and keeps them; toggling
+/// Letterbox/Crop or the background colour then only re-runs the cheap fit step
+/// ([fitGifFrames]) over the cached list rather than re-decoding every frame.
+class DecodedGifFrame {
+  const DecodedGifFrame({required this.image, required this.durationMs});
+
+  /// The decoded source frame at its original resolution.
+  final img.Image image;
+
+  /// The frame's authored display duration in milliseconds.
+  final int durationMs;
+}
+
 /// Clamps a GIF frame's authored [rawMs] duration up to the panel-safe floor.
 ///
 /// Returns [rawMs] unchanged when it already meets or exceeds
@@ -49,18 +66,18 @@ class PanelGifFrame {
 int gifFrameIntervalMs(int rawMs) =>
     rawMs < kGifMinFrameIntervalMs ? kGifMinFrameIntervalMs : rawMs;
 
-/// Decodes [bytes] as a GIF and fits every frame onto the panel.
+/// Decodes [bytes] as a GIF into its raw source frames — the expensive step.
 ///
-/// Each returned [PanelGifFrame] carries the fitted PNG and the source frame's
-/// authored duration (unclamped). A single-frame GIF yields a one-element list;
-/// callers decide whether that is a static image or a (degenerate) loop.
+/// Runs the `image` package's GIF decoder exactly once and captures each
+/// frame's authored duration. No fitting or encoding happens here, so the
+/// result can be cached and re-fitted cheaply via [fitGifFrames] whenever the
+/// fit mode or background colour changes.
+///
+/// A single-frame GIF yields a one-element list; callers decide whether that is
+/// a static image or a (degenerate) loop.
 ///
 /// Throws [ImageDecodeException] when [bytes] is not a decodable GIF.
-List<PanelGifFrame> extractGifFrames(
-  Uint8List bytes, {
-  PanelFit fit = PanelFit.letterbox,
-  String bgColor = '#000000',
-}) {
+List<DecodedGifFrame> decodeGifFrames(Uint8List bytes) {
   // A trust boundary: bytes come from an arbitrary user-picked file, and the
   // `image` package's GIF decoder can throw a raw `RangeError` on a truncated
   // or garbled file rather than returning `null`. Normalise both into a domain
@@ -77,11 +94,40 @@ List<PanelGifFrame> extractGifFrames(
   // A decoded animation exposes its frames via `frames`; a degenerate GIF with
   // no frame list still holds a single image in itself.
   final frames = decoded.frames.isEmpty ? <img.Image>[decoded] : decoded.frames;
+  return <DecodedGifFrame>[
+    for (final frame in frames)
+      DecodedGifFrame(image: frame, durationMs: frame.frameDuration),
+  ];
+}
+
+/// Fits already-decoded [frames] onto the panel — the cheap step.
+///
+/// Each returned [PanelGifFrame] carries the fitted PNG and the source frame's
+/// authored duration (unclamped). Pure fit + encode over cached frames, so it
+/// is safe to re-run on every fit/background change without re-decoding.
+List<PanelGifFrame> fitGifFrames(
+  List<DecodedGifFrame> frames, {
+  PanelFit fit = PanelFit.letterbox,
+  String bgColor = '#000000',
+}) {
   return <PanelGifFrame>[
     for (final frame in frames)
       PanelGifFrame(
-        png: encodePanelPng(fitImage(frame, fit: fit, bgColor: bgColor)),
-        durationMs: frame.frameDuration,
+        png: encodePanelPng(fitImage(frame.image, fit: fit, bgColor: bgColor)),
+        durationMs: frame.durationMs,
       ),
   ];
 }
+
+/// Decodes [bytes] as a GIF and fits every frame onto the panel in one pass.
+///
+/// A convenience composition of [decodeGifFrames] + [fitGifFrames] for callers
+/// that do not need to cache the decode (e.g. the pure-module tests). The page
+/// decodes once and re-fits via the two steps directly.
+///
+/// Throws [ImageDecodeException] when [bytes] is not a decodable GIF.
+List<PanelGifFrame> extractGifFrames(
+  Uint8List bytes, {
+  PanelFit fit = PanelFit.letterbox,
+  String bgColor = '#000000',
+}) => fitGifFrames(decodeGifFrames(bytes), fit: fit, bgColor: bgColor);

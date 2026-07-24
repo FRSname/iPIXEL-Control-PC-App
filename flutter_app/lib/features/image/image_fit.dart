@@ -31,14 +31,25 @@ Uint8List fitImageToPanelPng(
   Uint8List bytes, {
   PanelFit fit = PanelFit.letterbox,
   String bgColor = '#000000',
-}) {
-  final decoded = _decode(bytes);
-  final fitted = fitImage(decoded, fit: fit, bgColor: bgColor);
-  return encodePanelPng(fitted);
-}
+}) => fitDecodedImageToPanelPng(
+  decodePanelImage(bytes),
+  fit: fit,
+  bgColor: bgColor,
+);
+
+/// Fits an already-decoded [image] onto the panel and encodes it — the cheap
+/// step.
+///
+/// Pure fit + encode with no decode, so the page can cache the decoded source
+/// once and re-run this on every fit/background change without re-decoding.
+Uint8List fitDecodedImageToPanelPng(
+  img.Image image, {
+  PanelFit fit = PanelFit.letterbox,
+  String bgColor = '#000000',
+}) => encodePanelPng(fitImage(image, fit: fit, bgColor: bgColor));
 
 /// Decodes [bytes] into an image, normalising every failure mode into an
-/// [ImageDecodeException].
+/// [ImageDecodeException] — the expensive step.
 ///
 /// This is a trust boundary: the bytes come from an arbitrary user-picked file.
 /// The `image` package's format decoders do not fully validate their input —
@@ -46,7 +57,7 @@ Uint8List fitImageToPanelPng(
 /// rather than returning `null`. Converting both the `null` result and any
 /// thrown decoder failure into one domain exception lets the page surface a
 /// clean "could not read that image" message instead of crashing.
-img.Image _decode(Uint8List bytes) {
+img.Image decodePanelImage(Uint8List bytes) {
   final img.Image? decoded;
   try {
     decoded = img.decodeImage(bytes);
