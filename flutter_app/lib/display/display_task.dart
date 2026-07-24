@@ -76,39 +76,69 @@ class ActiveDisplayTaskController extends Notifier<bool> {
     return false;
   }
 
+  /// Serializes lifecycle mutations so overlapping [run]/[clear] calls can never
+  /// interleave across their `stop()`/`start()` suspension points.
+  ///
+  /// Both [run] and [clear] read [_current], then `await` a stop/start. Without
+  /// serialization two calls that arrive close together — e.g. two quick control
+  /// changes each restarting a clock — both read the SAME [_current], both stop
+  /// it once, then race to overwrite [_current]; the task installed first is
+  /// dropped without ever being stopped, orphaning a still-ticking loop that
+  /// nothing can reach to halt. Chaining every mutation through one queue makes
+  /// them strictly sequential, preserving the single-active-task invariant.
+  Future<void> _queue = Future<void>.value();
+
+  /// Runs [action] after all previously enqueued mutations complete. Any
+  /// throwable is forwarded to this call's own future; the queue itself never
+  /// breaks (a failed action must not wedge every later run/clear).
+  Future<T> _enqueue<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    _queue = _queue.then((_) async {
+      try {
+        completer.complete(await action());
+      } on Object catch (error, stack) {
+        completer.completeError(error, stack);
+      }
+    });
+    return completer.future;
+  }
+
   /// Stops the current task (if any), installs [task], then starts it.
   ///
   /// The previous task is stopped BEFORE the new one starts, so exclusivity
   /// holds even while [DisplayTask.start] is still running. If [start] throws,
-  /// the slot is left empty and the error propagates to the caller.
-  Future<void> run(DisplayTask task) async {
-    final previous = _current;
-    if (previous != null && !identical(previous, task)) {
-      // stop() must never throw (see DisplayTask.stop contract), but guard
-      // against a misbehaving impl so a broken teardown can't strand the slot.
+  /// the slot is left empty and the error propagates to the caller. Serialized
+  /// against other [run]/[clear] calls (see [_enqueue]).
+  Future<void> run(DisplayTask task) {
+    return _enqueue(() async {
+      final previous = _current;
+      if (previous != null && !identical(previous, task)) {
+        // stop() must never throw (see DisplayTask.stop contract), but guard
+        // against a misbehaving impl so a broken teardown can't strand the slot.
+        try {
+          await previous.stop();
+        } on Exception catch (error, stack) {
+          log(
+            'Previous display task threw from stop(); proceeding',
+            name: _logName,
+            error: error,
+            stackTrace: stack,
+          );
+        }
+      }
+      _current = task;
+      state = true;
       try {
-        await previous.stop();
-      } on Exception catch (error, stack) {
-        log(
-          'Previous display task threw from stop(); proceeding',
-          name: _logName,
-          error: error,
-          stackTrace: stack,
-        );
+        await task.start();
+      } on Object {
+        // A task that fails to start never becomes the active output.
+        if (identical(_current, task)) {
+          _current = null;
+          state = false;
+        }
+        rethrow;
       }
-    }
-    _current = task;
-    state = true;
-    try {
-      await task.start();
-    } on Object {
-      // A task that fails to start never becomes the active output.
-      if (identical(_current, task)) {
-        _current = null;
-        state = false;
-      }
-      rethrow;
-    }
+    });
   }
 
   /// Retunes the active task's scroll rate in place from a UI speed (1..100).
@@ -124,12 +154,15 @@ class ActiveDisplayTaskController extends Notifier<bool> {
   }
 
   /// Stops and clears the active task. No-op when the slot is already empty.
-  Future<void> clear() async {
-    final previous = _current;
-    if (previous == null) return;
-    _current = null;
-    state = false;
-    await previous.stop();
+  /// Serialized against other [run]/[clear] calls (see [_enqueue]).
+  Future<void> clear() {
+    return _enqueue(() async {
+      final previous = _current;
+      if (previous == null) return;
+      _current = null;
+      state = false;
+      await previous.stop();
+    });
   }
 }
 
