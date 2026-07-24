@@ -33,6 +33,7 @@ class ClockDisplayTask implements DisplayTask {
     required this.publishFrame,
     required this.renderText,
     required this.nextDelay,
+    this.onError,
     DateTime Function()? now,
     TimerFactory? timerFactory,
   }) : _now = now ?? DateTime.now,
@@ -43,6 +44,13 @@ class ClockDisplayTask implements DisplayTask {
   final String bgColor;
   final ImageSink send;
   final FrameCallback publishFrame;
+
+  /// Notified when a mid-run tick fails and the loop self-stops. The page wires
+  /// this to clear the app-wide active-task slot and surface the failure, so a
+  /// dead loop never looks like it is still running. Fired at most once per
+  /// task; the callback must not call [stop] in a way that re-enters here (a
+  /// controller `clear()` calling [stop] again is fine — [stop] is idempotent).
+  final void Function(Object error)? onError;
 
   /// The current display string for a given instant.
   final String Function(DateTime now) renderText;
@@ -55,6 +63,10 @@ class ClockDisplayTask implements DisplayTask {
 
   bool _running = false;
   Timer? _timer;
+
+  /// Guards [onError] against a double fire, so the page shows one message even
+  /// if the failure path is somehow re-entered.
+  bool _errorNotified = false;
 
   /// The last string actually sent to the panel, or `null` before the first
   /// send. The dedupe compares against this so an unchanged tick sends nothing.
@@ -94,9 +106,21 @@ class ClockDisplayTask implements DisplayTask {
         stackTrace: stack,
       );
       await stop();
+      // Surface the failure so the app-wide active-task flag can be cleared and
+      // the user sees it, rather than the panel silently freezing. Done after
+      // stop() so the loop is already halted when the page reacts.
+      _notifyError(error);
       return;
     }
     _scheduleNext();
+  }
+
+  /// Fires [onError] exactly once. Idempotent so a re-entrant failure path (or a
+  /// callback that routes back through [stop]) still surfaces a single message.
+  void _notifyError(Object error) {
+    if (_errorNotified) return;
+    _errorNotified = true;
+    onError?.call(error);
   }
 
   Future<void> _renderMaybeSend() async {

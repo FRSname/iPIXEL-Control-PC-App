@@ -121,6 +121,7 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
       publishFrame: ref.read(panelPreviewProvider.notifier).setFrame,
       renderText: _renderText,
       nextDelay: _nextDelay,
+      onError: _onTaskError,
     );
 
     setState(() => _starting = true);
@@ -136,6 +137,33 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
   }
 
   Future<void> _stop() => ref.read(activeDisplayTaskProvider.notifier).clear();
+
+  /// Called when a running [ClockDisplayTask] fails a tick and self-stops. The
+  /// task has already halted; clear the app-wide slot so the UI stops showing
+  /// "running", and surface the reason instead of freezing silently. Idempotent
+  /// against re-entry: `clear()` calls the task's already-idempotent `stop()`.
+  void _onTaskError(Object error) {
+    if (!mounted) return;
+    unawaited(ref.read(activeDisplayTaskProvider.notifier).clear());
+    final message = error is SpriteRenderException
+        ? error.message
+        : 'The clock stopped: could not send to the panel.';
+    _showError(message);
+  }
+
+  /// Restarts the active clock so a live control change stays in lock-step with
+  /// the font it needs. A mid-run mode/format/font/background change re-runs the
+  /// start path, which re-resolves the font for the *current* mode (sprite →
+  /// clock sheet, custom/countdown → text sheet) and rebuilds the task — so the
+  /// render output can never outrun the frozen font and throw on the next tick.
+  /// A no-op when no clock is showing; only a running task is retuned.
+  void _restartIfActive() {
+    if (!ref.read(activeDisplayTaskProvider)) return;
+    final names =
+        ref.read(spriteFontRegistryProvider).value?.fontNames ??
+        const <String>[];
+    unawaited(_start(names));
+  }
 
   Future<void> _pickTarget() async {
     final date = await showDatePicker(
@@ -154,6 +182,15 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
     setState(() {
       _target = DateTime(date.year, date.month, date.day, t.hour, t.minute);
     });
+    _restartIfActive();
+  }
+
+  /// Applies a control change and, if a clock is already showing, restarts it so
+  /// the change takes effect on the panel immediately (mirrors the Text page's
+  /// live retune — but a full restart, since font/mode cannot retune in place).
+  void _applyChange(VoidCallback change) {
+    setState(change);
+    _restartIfActive();
   }
 
   void _showError(String message) {
@@ -194,7 +231,7 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
             const SizedBox(height: 24),
             _ModeCard(
               mode: _mode,
-              onModeChanged: (mode) => setState(() => _mode = mode),
+              onModeChanged: (mode) => _applyChange(() => _mode = mode),
             ),
             const SizedBox(height: 16),
             _modeCard(),
@@ -204,7 +241,7 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
               child: ColorField(
                 label: 'Colour',
                 value: _bgColor,
-                onChanged: (hex) => setState(() => _bgColor = hex),
+                onChanged: (hex) => _applyChange(() => _bgColor = hex),
               ),
             ),
             const SizedBox(height: 16),
@@ -212,7 +249,7 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
               fontsAsync: fontsAsync,
               selected: _fontName,
               resolve: _effectiveFont,
-              onChanged: (name) => setState(() => _fontName = name),
+              onChanged: (name) => _applyChange(() => _fontName = name),
             ),
             const SizedBox(height: 20),
             _ActionRow(
@@ -239,18 +276,18 @@ class _ClockFeaturePageState extends ConsumerState<ClockFeaturePage> {
   Widget _modeCard() => switch (_mode) {
     ClockMode.sprite => _SpriteCard(
       showSeconds: _showSeconds,
-      onChanged: (value) => setState(() => _showSeconds = value),
+      onChanged: (value) => _applyChange(() => _showSeconds = value),
     ),
     ClockMode.custom => _CustomCard(
       format: _customFormat,
-      onChanged: (value) => setState(() => _customFormat = value),
+      onChanged: (value) => _applyChange(() => _customFormat = value),
     ),
     ClockMode.countdown => _CountdownCard(
       eventController: _eventController,
       target: _target,
       format: _countdownFormat,
       onPickTarget: _pickTarget,
-      onFormatChanged: (value) => setState(() => _countdownFormat = value),
+      onFormatChanged: (value) => _applyChange(() => _countdownFormat = value),
     ),
   };
 }

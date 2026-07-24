@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,6 +9,7 @@ import 'package:image/image.dart' as img;
 
 import 'package:ipixel_controller/ble/device_session.dart';
 import 'package:ipixel_controller/ble/providers.dart';
+import 'package:ipixel_controller/display/display_task.dart';
 import 'package:ipixel_controller/display/providers.dart';
 import 'package:ipixel_controller/display/sprite_font_registry.dart';
 import 'package:ipixel_controller/features/clock/clock_page.dart';
@@ -147,5 +149,62 @@ void main() {
     // Stop the loop so the test's pending timer does not leak.
     await tester.tap(find.widgetWithText(OutlinedButton, 'Stop'));
     await tester.pump();
+  });
+
+  testWidgets('disconnecting mid-clock stops the active display task', (
+    tester,
+  ) async {
+    final sink = _RecordingSink();
+    final statusController = StreamController<BleConnectionStatus>.broadcast();
+    addTearDown(statusController.close);
+    final service = _fontService();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          spriteFontRegistryProvider.overrideWith((ref) async => service),
+          connectionStatusProvider.overrideWith(
+            (ref) => statusController.stream,
+          ),
+          panelImageSinkProvider.overrideWithValue(sink.call),
+        ],
+        child: const MaterialApp(home: Scaffold(body: ClockFeaturePage())),
+      ),
+    );
+    statusController.add(BleConnectionStatus.ready);
+    await tester.pumpAndSettle();
+
+    final showButton = find.widgetWithText(FilledButton, 'Show clock');
+    await tester.ensureVisible(showButton);
+    await tester.tap(showButton);
+    // Not pumpAndSettle: a live clock keeps a timer pending forever.
+    await tester.pump();
+    await tester.pump();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ClockFeaturePage)),
+    );
+    expect(
+      container.read(activeDisplayTaskProvider),
+      isTrue,
+      reason: 'clock task is active',
+    );
+    final framesBeforeDisconnect = sink.pngs.length;
+    expect(framesBeforeDisconnect, greaterThanOrEqualTo(1));
+
+    // Drop the connection mid-clock: the page's ref.listen clears the slot.
+    statusController.add(BleConnectionStatus.disconnected);
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      container.read(activeDisplayTaskProvider),
+      isFalse,
+      reason: 'the disconnect listener cleared the active task',
+    );
+
+    // The clock timer is cancelled: advancing time yields no more frames.
+    await tester.pump(const Duration(seconds: 2));
+    expect(sink.pngs.length, framesBeforeDisconnect, reason: 'timer stopped');
   });
 }

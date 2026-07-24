@@ -224,6 +224,56 @@ void main() {
       expect(sends, hasLength(1), reason: 'no frames after stop');
     });
 
+    test('stop awaits an in-flight send and no frame follows it', () async {
+      final scheduler = _ManualScheduler();
+      final gate = Completer<void>();
+      final sends = <Uint8List>[];
+      var sendStarted = 0;
+      final now = DateTime(2026, 1, 1, 12, 0, 0);
+
+      final task = ClockDisplayTask(
+        fonts: _textFontService(),
+        fontName: 'Text Default',
+        bgColor: '#000000',
+        send: (png) async {
+          sendStarted++;
+          await gate.future;
+          sends.add(png);
+        },
+        publishFrame: (_) {},
+        renderText: (n) => formatCustomTime(n, '%H:%M:%S'),
+        nextDelay: (_) => const Duration(seconds: 1),
+        now: () => now,
+        timerFactory: scheduler.factory,
+      );
+
+      // start() awaits the first frame's send, which blocks on the gate.
+      final startFuture = task.start();
+      await _pump();
+      expect(sendStarted, 1);
+      expect(sends, isEmpty, reason: 'the send is gated open');
+
+      // stop() must not resolve until the in-flight send resolves.
+      var stopDone = false;
+      final stopFuture = task.stop().then((_) => stopDone = true);
+      await _pump();
+      expect(stopDone, isFalse, reason: 'stop waits for the in-flight send');
+      expect(sends, isEmpty);
+
+      gate.complete();
+      await startFuture;
+      await stopFuture;
+      expect(stopDone, isTrue);
+      expect(
+        sends,
+        hasLength(1),
+        reason: 'the single in-flight frame resolved',
+      );
+      // stop() ran before start() could arm the next timer, so nothing keeps
+      // ticking: no frame is recorded after stop() resolves.
+      expect(scheduler.durations, isEmpty, reason: 'no timer armed after stop');
+    });
+
     test('a mid-run send failure stops the loop', () async {
       final scheduler = _ManualScheduler();
       final sends = <Uint8List>[];
