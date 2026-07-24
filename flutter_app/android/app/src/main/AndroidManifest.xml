@@ -1,4 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- BLE permissions. Layout copied from the universal_ble 2.1.0 README
+         ("Android → Manifest Permissions"). The app scans and connects to LED
+         panels only; it does not derive location from BLE, so BLUETOOTH_SCAN is
+         flagged neverForLocation and the legacy location grants are capped to
+         the API levels that require them. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <application
         android:label="ipixel_controller"
         android:name="${applicationName}"

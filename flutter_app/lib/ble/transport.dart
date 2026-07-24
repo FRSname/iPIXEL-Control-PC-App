@@ -84,6 +84,36 @@ abstract interface class BleTransport {
   /// Current adapter availability. Used to surface permission failures clearly.
   Future<BleAvailability> availability();
 
+  /// Broadcast stream of adapter-availability transitions.
+  ///
+  /// Used to wait for the adapter to reach [BleAvailability.poweredOn] before a
+  /// scan. On macOS/iOS the first subscription initialises CoreBluetooth and
+  /// triggers the system Bluetooth-permission prompt; calling [startScan] before
+  /// the adapter is powered on there crashes the app, so callers gate on this
+  /// first (see `ble_readiness.dart`).
+  Stream<BleAvailability> get availabilityChanges;
+
+  /// Whether the runtime BLE permissions are already granted.
+  ///
+  /// Lets callers skip a "why we need Bluetooth" rationale when the OS has
+  /// already granted access. On Android this queries the live grant state; on
+  /// Windows, Linux and Web there is no runtime BLE permission so it returns
+  /// `true`. [withAndroidFineLocation] mirrors [requestPermissions].
+  Future<bool> hasPermissions({bool withAndroidFineLocation = false});
+
+  /// Requests the runtime BLE permissions the platform needs before scanning.
+  ///
+  /// On Android 12+ this prompts for `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT`; on
+  /// Android ≤11 for location. Completes when permissions are granted and throws
+  /// on denial. On Windows, Linux, macOS and Web there are no runtime BLE
+  /// permissions and this completes immediately. If permissions are already
+  /// granted it completes as a no-op.
+  ///
+  /// [withAndroidFineLocation] requests `ACCESS_FINE_LOCATION` on Android 12+
+  /// (only needed if scan results are used to derive location — this app does
+  /// not, so callers pass `false`).
+  Future<void> requestPermissions({bool withAndroidFineLocation = false});
+
   /// Broadcast stream of scan advertisements. Emits only while a scan is active.
   Stream<BleScanResult> get scanResults;
 

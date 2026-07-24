@@ -1,11 +1,13 @@
-/// Text feature placeholder. S7 replaces this body with the real text input,
-/// colour pickers, sprite-font dropdown and scroll controls — editing only this
-/// file, not the shared registry.
+/// Registration shim for the Text feature.
+///
+/// The real UI lives in `lib/features/text/text_page.dart`; this file only
+/// exports the [PageDef] the shared registry lists, so `page_registry.dart`
+/// never changes when a feature is filled in.
 library;
 
 import 'package:flutter/material.dart';
 
-import 'package:ipixel_controller/ui/pages/feature_scaffold.dart';
+import 'package:ipixel_controller/features/text/text_page.dart';
 import 'package:ipixel_controller/ui/pages/page_def.dart';
 
 final PageDef textPageDef = PageDef(
@@ -13,17 +15,5 @@ final PageDef textPageDef = PageDef(
   label: 'Text',
   icon: Icons.text_fields_outlined,
   selectedIcon: Icons.text_fields,
-  builder: () => const TextPage(key: Key('page-text')),
+  builder: () => const TextFeaturePage(key: Key('page-text')),
 );
-
-class TextPage extends StatelessWidget {
-  const TextPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const FeatureScaffold(
-      title: 'Text',
-      children: [ComingSoonCard(feature: 'Scrolling and static text')],
-    );
-  }
-}

@@ -381,12 +381,9 @@ class SpriteFontService {
   }
 }
 
-/// Converts a UI speed value (1..100) to a scroll interval in milliseconds.
-///
-/// Higher speed means a shorter interval. Ported verbatim from the Python
-/// `speed_to_interval_ms`: speed 1 -> 218 ms, speed 100 -> 20 ms.
-int speedToIntervalMs(int speed) {
-  final clamped = speed < 1 ? 1 : (speed > 100 ? 100 : speed);
-  final interval = 220 - clamped * 2;
-  return interval < 20 ? 20 : interval;
-}
+// Note: the UI-speed → scroll-interval mapping lives in
+// `display/sprite_sender.dart` (`scrollIntervalMs`). The legacy `220 - speed*2`
+// port that used to sit here spanned 218 → 20 ms, which fell almost entirely
+// below the panel-safe 120 ms floor and flattened the top half of the speed
+// slider to one rate; the sender now maps speed across a band that sits above
+// the floor, so this helper was removed rather than left as a footgun.

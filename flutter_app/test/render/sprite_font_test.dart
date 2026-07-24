@@ -342,17 +342,4 @@ void main() {
       expect(err, contains('Invalid background colour'));
     });
   });
-
-  group('speedToIntervalMs', () {
-    test('clamps and maps the UI speed range', () {
-      expect(speedToIntervalMs(1), 218);
-      expect(speedToIntervalMs(100), 20);
-      expect(speedToIntervalMs(50), 120);
-      // Clamping outside 1..100.
-      expect(speedToIntervalMs(0), 218);
-      expect(speedToIntervalMs(200), 20);
-      // Floor of 20 ms holds for the fast end.
-      expect(speedToIntervalMs(101), 20);
-    });
-  });
 }
